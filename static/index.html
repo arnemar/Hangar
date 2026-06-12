@@ -1,0 +1,1101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Workspace</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<style>
+  :root {
+    --bg: #0d0d0d;
+    --bg2: #141414;
+    --bg3: #1a1a1a;
+    --bg4: #222222;
+    --border: #2a2a2a;
+    --border2: #333333;
+    --text: #e0e0e0;
+    --text2: #888888;
+    --text3: #555555;
+    --accent: #00d4aa;
+    --accent2: #00a882;
+    --red: #ff4d4d;
+    --yellow: #f0a500;
+    --blue: #4d9fff;
+    --purple: #b06cff;
+    --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+    --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --radius: 6px;
+    --sidebar: 240px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--font-sans); font-size: 14px; height: 100vh; overflow: hidden; }
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+  /* Layout */
+  .layout { display: flex; height: 100vh; }
+  .sidebar { width: var(--sidebar); background: var(--bg2); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; }
+  .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* Sidebar */
+  .sidebar-header { padding: 16px 12px 8px; border-bottom: 1px solid var(--border); }
+  .logo { font-family: var(--font-mono); font-size: 15px; font-weight: 700; color: var(--accent); letter-spacing: -0.5px; }
+  .logo span { color: var(--text3); font-weight: 400; }
+  .mode-tabs { display: flex; gap: 4px; margin-top: 10px; }
+  .mode-tab { flex: 1; padding: 5px 4px; border: 1px solid var(--border); border-radius: var(--radius); background: transparent; color: var(--text2); font-size: 11px; cursor: pointer; text-align: center; transition: all 0.15s; font-family: var(--font-mono); }
+  .mode-tab.active { background: var(--accent); border-color: var(--accent); color: #000; font-weight: 600; }
+  .mode-tab:hover:not(.active) { border-color: var(--border2); color: var(--text); }
+
+  .sidebar-section { padding: 8px 12px 4px; font-size: 10px; font-family: var(--font-mono); color: var(--text3); text-transform: uppercase; letter-spacing: 0.08em; }
+  .new-chat-btn { margin: 0 8px 4px; padding: 7px 10px; background: transparent; border: 1px dashed var(--border2); border-radius: var(--radius); color: var(--text2); font-size: 12px; cursor: pointer; text-align: left; transition: all 0.15s; display: flex; align-items: center; gap: 6px; }
+  .new-chat-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  .session-list { flex: 1; overflow-y: auto; padding: 0 8px; }
+  .session-item { padding: 7px 8px; border-radius: var(--radius); cursor: pointer; display: flex; align-items: center; justify-content: space-between; group: true; margin-bottom: 1px; }
+  .session-item:hover { background: var(--bg3); }
+  .session-item.active { background: var(--bg4); }
+  .session-title { font-size: 12px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
+  .session-mode { font-size: 9px; font-family: var(--font-mono); padding: 2px 5px; border-radius: 3px; flex-shrink: 0; margin-left: 4px; }
+  .session-mode.chat { background: rgba(77,159,255,0.15); color: var(--blue); }
+  .session-mode.agent { background: rgba(176,108,255,0.15); color: var(--purple); }
+  .session-delete { opacity: 0; font-size: 11px; color: var(--text3); padding: 2px 4px; cursor: pointer; border-radius: 3px; }
+  .session-item:hover .session-delete { opacity: 1; }
+  .session-delete:hover { color: var(--red); background: rgba(255,77,77,0.1); }
+
+  .sidebar-bottom { padding: 8px; border-top: 1px solid var(--border); }
+  .model-select { width: 100%; padding: 6px 8px; background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); font-size: 11px; font-family: var(--font-mono); cursor: pointer; }
+  .model-select:focus { outline: none; border-color: var(--accent); }
+
+  /* Main area */
+  .topbar { padding: 10px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; background: var(--bg2); flex-shrink: 0; }
+  .topbar-title { font-size: 13px; font-weight: 500; color: var(--text); flex: 1; }
+  .topbar-mode { font-size: 10px; font-family: var(--font-mono); padding: 3px 8px; border-radius: 3px; }
+  .topbar-mode.chat { background: rgba(77,159,255,0.15); color: var(--blue); border: 1px solid rgba(77,159,255,0.2); }
+  .topbar-mode.agent { background: rgba(176,108,255,0.15); color: var(--purple); border: 1px solid rgba(176,108,255,0.2); }
+
+  /* Messages */
+  .messages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+  .empty-state { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--text3); }
+  .empty-icon { font-size: 32px; margin-bottom: 4px; }
+  .empty-title { font-size: 16px; color: var(--text2); font-weight: 500; }
+  .empty-sub { font-size: 12px; }
+
+  .message { display: flex; flex-direction: column; gap: 4px; max-width: 100%; }
+  .message.user { align-items: flex-end; }
+  .message.assistant { align-items: flex-start; }
+  .message-bubble { padding: 10px 14px; border-radius: var(--radius); max-width: 80%; line-height: 1.6; }
+  .message.user .message-bubble { background: var(--accent); color: #000; font-weight: 500; }
+  .message.assistant .message-bubble { background: var(--bg3); border: 1px solid var(--border); color: var(--text); }
+  .message-meta { font-size: 10px; color: var(--text3); font-family: var(--font-mono); padding: 0 4px; }
+
+  /* Tool calls */
+  .tool-block { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; max-width: 80%; }
+  .tool-header { padding: 6px 12px; background: var(--bg4); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 11px; }
+  .tool-name { color: var(--purple); font-weight: 600; }
+  .tool-status { margin-left: auto; font-size: 10px; }
+  .tool-status.running { color: var(--yellow); }
+  .tool-status.done { color: var(--accent); }
+  .tool-args { padding: 8px 12px; font-family: var(--font-mono); font-size: 11px; color: var(--text2); border-bottom: 1px solid var(--border); }
+  .tool-result { padding: 8px 12px; font-family: var(--font-mono); font-size: 11px; color: var(--text); white-space: pre-wrap; max-height: 200px; overflow-y: auto; }
+
+  /* Thinking indicator */
+  .thinking { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); font-size: 12px; color: var(--text2); font-family: var(--font-mono); max-width: 200px; }
+  .thinking-dots { display: flex; gap: 3px; }
+  .thinking-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--accent); animation: pulse 1.2s infinite; }
+  .thinking-dot:nth-child(2) { animation-delay: 0.2s; }
+  .thinking-dot:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes pulse { 0%,80%,100% { opacity: 0.3; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1); } }
+
+  /* Code blocks */
+  .message-bubble pre { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 10px; margin: 8px 0; overflow-x: auto; font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
+  .message-bubble code { font-family: var(--font-mono); font-size: 12px; background: var(--bg); padding: 1px 4px; border-radius: 3px; color: var(--accent); }
+  .message-bubble pre code { background: transparent; padding: 0; color: var(--text); }
+
+  /* Input */
+  .input-area { padding: 16px 20px; border-top: 1px solid var(--border); background: var(--bg2); flex-shrink: 0; }
+  .input-row { display: flex; gap: 8px; align-items: flex-end; }
+  .input-wrap { flex: 1; background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); display: flex; align-items: flex-end; }
+  .input-wrap:focus-within { border-color: var(--accent); }
+  .input-box { flex: 1; background: transparent; border: none; outline: none; color: var(--text); font-size: 14px; padding: 10px 12px; resize: none; font-family: var(--font-sans); max-height: 120px; line-height: 1.5; }
+  .input-box::placeholder { color: var(--text3); }
+  .send-btn { padding: 8px 16px; background: var(--accent); border: none; border-radius: var(--radius); color: #000; font-weight: 600; font-size: 13px; cursor: pointer; transition: all 0.15s; flex-shrink: 0; height: 40px; }
+  .send-btn:hover { background: var(--accent2); }
+  .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .stop-btn { padding: 8px 16px; background: transparent; border: 1px solid var(--red); border-radius: var(--radius); color: var(--red); font-weight: 600; font-size: 13px; cursor: pointer; transition: all 0.15s; flex-shrink: 0; height: 40px; font-family: var(--font-mono); }
+  .stop-btn:hover { background: rgba(255,77,77,0.1); }
+  .input-hint { font-size: 10px; color: var(--text3); margin-top: 6px; font-family: var(--font-mono); }
+  .stats-bar { padding: 4px 20px; background: var(--bg2); border-top: 1px solid var(--border); display: flex; gap: 16px; align-items: center; font-family: var(--font-mono); font-size: 10px; color: var(--text3); flex-shrink: 0; }
+  .stat { display: flex; align-items: center; gap: 4px; }
+  .stat-val { color: var(--accent); }
+  .stat-sep { color: var(--border2); }
+
+  /* Memory tab */
+  .memory-view { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+  .memory-header { display: flex; align-items: center; justify-content: space-between; }
+  .memory-title { font-size: 16px; font-weight: 600; }
+  .memory-add { display: flex; gap: 8px; }
+  .memory-input { flex: 1; padding: 8px 12px; background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); font-size: 13px; outline: none; }
+  .memory-input:focus { border-color: var(--accent); }
+  .add-btn { padding: 8px 14px; background: var(--accent); border: none; border-radius: var(--radius); color: #000; font-weight: 600; font-size: 13px; cursor: pointer; }
+  .memory-list { display: flex; flex-direction: column; gap: 8px; }
+  .memory-item { padding: 10px 14px; background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); display: flex; align-items: flex-start; gap: 10px; }
+  .memory-content { flex: 1; font-size: 13px; line-height: 1.5; }
+  .memory-date { font-size: 10px; color: var(--text3); font-family: var(--font-mono); margin-top: 4px; }
+  .memory-del { color: var(--text3); cursor: pointer; font-size: 14px; padding: 2px; flex-shrink: 0; }
+  .memory-del:hover { color: var(--red); }
+  .memory-empty { color: var(--text3); font-size: 13px; text-align: center; padding: 40px; }
+
+  /* Modal */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 100; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
+  .modal { background: var(--bg2); border: 1px solid var(--border2); border-radius: 10px; width: 580px; max-width: 95vw; max-height: 85vh; display: flex; flex-direction: column; overflow: hidden; }
+  .modal-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+  .modal-title { font-size: 15px; font-weight: 600; }
+  .modal-close { background: none; border: none; color: var(--text3); cursor: pointer; font-size: 18px; padding: 2px 6px; border-radius: 4px; }
+  .modal-close:hover { color: var(--text); background: var(--bg4); }
+  .modal-body { overflow-y: auto; flex: 1; }
+  .modal-tabs { display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .modal-tab { padding: 10px 18px; font-size: 12px; font-family: var(--font-mono); color: var(--text2); cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s; }
+  .modal-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .modal-tab:hover:not(.active) { color: var(--text); }
+  .settings-section { padding: 16px 20px; border-bottom: 1px solid var(--border); }
+  .settings-section:last-child { border-bottom: none; }
+  .settings-label { font-size: 11px; font-family: var(--font-mono); color: var(--text3); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px; }
+  .settings-input { width: 100%; padding: 8px 10px; background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); font-size: 13px; outline: none; font-family: var(--font-mono); }
+  .settings-input:focus { border-color: var(--accent); }
+  .settings-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .settings-row:last-child { margin-bottom: 0; }
+  .settings-save { padding: 7px 16px; background: var(--accent); border: none; border-radius: var(--radius); color: #000; font-weight: 600; font-size: 12px; cursor: pointer; }
+  .settings-save:hover { background: var(--accent2); }
+  .remote-item { padding: 10px 12px; background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 6px; }
+  .remote-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+  .remote-name { font-family: var(--font-mono); font-size: 12px; font-weight: 600; color: var(--accent); }
+  .remote-host { font-size: 11px; color: var(--text2); font-family: var(--font-mono); }
+  .remote-badges { display: flex; gap: 4px; margin-top: 4px; }
+  .badge-small { font-size: 9px; padding: 1px 5px; border-radius: 3px; font-family: var(--font-mono); }
+  .badge-key { background: rgba(0,212,170,0.1); color: var(--accent); border: 1px solid rgba(0,212,170,0.2); }
+  .badge-pass { background: rgba(240,165,0,0.1); color: var(--yellow); border: 1px solid rgba(240,165,0,0.2); }
+  .remote-del { color: var(--text3); cursor: pointer; font-size: 12px; }
+  .remote-del:hover { color: var(--red); }
+  .add-remote-form { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; margin-top: 8px; }
+  .add-remote-title { font-size: 11px; font-family: var(--font-mono); color: var(--text2); margin-bottom: 10px; }
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+  .form-field { display: flex; flex-direction: column; gap: 4px; }
+  .form-label { font-size: 10px; color: var(--text3); font-family: var(--font-mono); }
+  .settings-btn { padding: 6px 12px; background: transparent; border: 1px solid var(--border2); border-radius: var(--radius); color: var(--text2); font-size: 11px; cursor: pointer; font-family: var(--font-mono); }
+  .settings-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .settings-btn.primary { background: var(--accent); border-color: var(--accent); color: #000; font-weight: 600; }
+  .settings-btn.primary:hover { background: var(--accent2); }
+  .settings-btn.danger:hover { border-color: var(--red); color: var(--red); }
+  .gear-btn { background: none; border: none; color: var(--text3); cursor: pointer; font-size: 14px; padding: 4px 6px; border-radius: 4px; }
+  .gear-btn:hover { color: var(--text); background: var(--bg4); }
+
+  /* Projects */
+  .project-panel { border-top: 1px solid var(--border); }
+  .project-panel-header { padding: 8px 12px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; }
+  .project-panel-header:hover { background: var(--bg3); }
+  .project-panel-title { font-size: 10px; font-family: var(--font-mono); color: var(--text3); text-transform: uppercase; letter-spacing: 0.08em; }
+  .project-toggle { font-size: 10px; color: var(--text3); }
+  .project-list { padding: 0 8px 8px; display: flex; flex-direction: column; gap: 2px; }
+  .project-item { padding: 7px 8px; border-radius: var(--radius); cursor: pointer; border: 1px solid transparent; transition: all 0.15s; }
+  .project-item:hover { background: var(--bg3); border-color: var(--border); }
+  .project-item.active { background: var(--bg4); border-color: var(--accent); }
+  .project-item-header { display: flex; align-items: center; justify-content: space-between; }
+  .project-name { font-size: 12px; font-weight: 500; color: var(--text); }
+  .project-remote-badge { font-size: 9px; font-family: var(--font-mono); padding: 1px 5px; border-radius: 3px; background: rgba(176,108,255,0.15); color: var(--purple); border: 1px solid rgba(176,108,255,0.2); }
+  .project-local-badge { font-size: 9px; font-family: var(--font-mono); padding: 1px 5px; border-radius: 3px; background: rgba(0,212,170,0.1); color: var(--accent); border: 1px solid rgba(0,212,170,0.2); }
+  .project-path { font-size: 10px; color: var(--text3); font-family: var(--font-mono); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .project-del { opacity: 0; font-size: 11px; color: var(--text3); padding: 1px 4px; cursor: pointer; border-radius: 3px; }
+  .project-item:hover .project-del { opacity: 1; }
+  .project-del:hover { color: var(--red); background: rgba(255,77,77,0.1); }
+  .add-project-btn { margin: 0 8px 4px; padding: 6px 10px; background: transparent; border: 1px dashed var(--border2); border-radius: var(--radius); color: var(--text2); font-size: 11px; cursor: pointer; text-align: left; display: flex; align-items: center; gap: 6px; transition: all 0.15s; }
+  .add-project-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .active-project-bar { padding: 6px 20px; background: rgba(176,108,255,0.08); border-bottom: 1px solid rgba(176,108,255,0.2); display: flex; align-items: center; gap: 8px; font-size: 11px; font-family: var(--font-mono); flex-shrink: 0; }
+  .active-project-name { color: var(--purple); font-weight: 600; }
+  .active-project-path { color: var(--text3); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .active-project-close { color: var(--text3); cursor: pointer; padding: 2px 6px; border-radius: 3px; }
+  .active-project-close:hover { color: var(--text); background: var(--bg4); }
+  /* Project setup modal */
+  .setup-step { padding: 20px; }
+  .setup-title { font-size: 14px; font-weight: 600; margin-bottom: 6px; }
+  .setup-sub { font-size: 12px; color: var(--text2); margin-bottom: 16px; line-height: 1.6; }
+  .type-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+  .type-card { padding: 14px; border: 1px solid var(--border); border-radius: var(--radius); cursor: pointer; transition: all 0.15s; }
+  .type-card:hover { border-color: var(--border2); background: var(--bg3); }
+  .type-card.selected { border-color: var(--accent); background: rgba(0,212,170,0.05); }
+  .type-card-icon { font-size: 20px; margin-bottom: 6px; }
+  .type-card-title { font-size: 13px; font-weight: 600; margin-bottom: 3px; }
+  .type-card-desc { font-size: 11px; color: var(--text2); line-height: 1.5; }
+  .remote-cards { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+  .remote-card { padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius); cursor: pointer; transition: all 0.15s; display: flex; align-items: center; gap: 10px; }
+  .remote-card:hover { border-color: var(--border2); background: var(--bg3); }
+  .remote-card.selected { border-color: var(--purple); background: rgba(176,108,255,0.05); }
+  .remote-card-name { font-size: 13px; font-weight: 600; font-family: var(--font-mono); }
+  .remote-card-host { font-size: 11px; color: var(--text2); }
+  .setup-nav { display: flex; justify-content: space-between; align-items: center; margin-top: 16px; }
+  .scanning-indicator { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text2); font-family: var(--font-mono); }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+const API = '';
+
+function formatTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function renderContent(text) {
+  if (!text) return null;
+  const parts = text.split(/(```[\s\S]*?```|`[^`]+`)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith('```')) {
+      const lines = part.slice(3, -3).split('\n');
+      const lang = lines[0];
+      const code = lines.slice(1).join('\n');
+      return <pre key={i}><code>{code || lang}</code></pre>;
+    }
+    if (part.startsWith('`') && part.endsWith('`')) {
+      return <code key={i}>{part.slice(1, -1)}</code>;
+    }
+    return <span key={i}>{part}</span>;
+  });
+}
+
+function ToolBlock({ call, result }) {
+  return (
+    <div className="tool-block">
+      <div className="tool-header">
+        <span>⚙</span>
+        <span className="tool-name">{call.tool}</span>
+        <span className={`tool-status ${result ? 'done' : 'running'}`}>
+          {result ? '✓ done' : '⟳ running'}
+        </span>
+      </div>
+      {call.args && Object.keys(call.args).length > 0 && (
+        <div className="tool-args">
+          {Object.entries(call.args).map(([k, v]) => (
+            <div key={k}><span style={{color:'var(--text3)'}}>{k}:</span> {String(v).slice(0, 200)}</div>
+          ))}
+        </div>
+      )}
+      {result && <div className="tool-result">{result.slice(0, 800)}{result.length > 800 ? '\n...(truncated)' : ''}</div>}
+    </div>
+  );
+}
+
+function Message({ msg }) {
+  if (msg.role === 'tool_call') {
+    return (
+      <div className="message assistant">
+        <ToolBlock call={msg.call} result={msg.result} />
+      </div>
+    );
+  }
+  if (msg.role === 'thinking') {
+    return (
+      <div className="message assistant">
+        <div className="thinking">
+          <div className="thinking-dots">
+            <div className="thinking-dot" /><div className="thinking-dot" /><div className="thinking-dot" />
+          </div>
+          <span>thinking...</span>
+        </div>
+      </div>
+    );
+  }
+  if (msg.role === 'user' || msg.role === 'assistant') {
+    return (
+      <div className={`message ${msg.role}`}>
+        <div className="message-bubble">{renderContent(msg.content)}</div>
+        <div className="message-meta">{formatTime(msg.created_at)}</div>
+      </div>
+    );
+  }
+  return null;
+}
+
+function ChatView({ session, model }) {
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [stats, setStats] = useState(null);
+  const abortRef = useRef(null);
+  const bottomRef = useRef(null);
+  const textareaRef = useRef(null);
+
+  useEffect(() => {
+    if (!session) return;
+    fetch(`${API}/api/sessions/${session.id}/messages`)
+      .then(r => r.json())
+      .then(d => setMessages(d.messages || []));
+  }, [session?.id]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  const stop = () => {
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
+    setLoading(false);
+    setMessages(prev => prev.filter(m => m.role !== 'thinking'));
+  };
+
+  const send = async () => {
+    if (!input.trim() || loading || !session) return;
+    const text = input.trim();
+    setInput('');
+    setLoading(true);
+
+    const userMsg = { id: Date.now(), role: 'user', content: text, created_at: new Date().toISOString() };
+    setMessages(prev => [...prev, userMsg]);
+
+    const endpoint = session.mode === 'agent' ? '/api/agent' : '/api/chat';
+
+    try {
+      const controller = new AbortController();
+      abortRef.current = controller;
+      let res;
+      try {
+        res = await fetch(`${API}${endpoint}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id: session.id, message: text, model, project: session.project || null }),
+          signal: controller.signal
+        });
+      } catch (e) {
+        if (e.name === 'AbortError') { setLoading(false); return; }
+        throw e;
+      }
+
+      const reader = res.body.getReader();
+      const originalRead = reader.read.bind(reader);
+      reader.read = async () => {
+        try { return await originalRead(); }
+        catch(e) { if (e.name === 'AbortError') return { done: true, value: undefined }; throw e; }
+      };
+      const decoder = new TextDecoder();
+      let assistantId = `assistant-${Date.now()}`;
+      let buffer = '';
+
+      if (session.mode === 'agent') {
+        // Agent mode: handle tool calls and final response
+        let pendingToolCalls = {};
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop();
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (data.type === 'thinking') {
+                setMessages(prev => {
+                  const filtered = prev.filter(m => m.role !== 'thinking');
+                  return [...filtered, { id: 'thinking', role: 'thinking' }];
+                });
+              } else if (data.type === 'tool_call') {
+                const tcId = `tc-${Date.now()}-${Math.random()}`;
+                pendingToolCalls[data.tool] = tcId;
+                setMessages(prev => {
+                  const filtered = prev.filter(m => m.role !== 'thinking');
+                  return [...filtered, { id: tcId, role: 'tool_call', call: { tool: data.tool, args: data.args }, result: null }];
+                });
+              } else if (data.type === 'tool_result') {
+                const tcId = pendingToolCalls[data.tool];
+                if (tcId) {
+                  setMessages(prev => prev.map(m => m.id === tcId ? { ...m, result: data.result } : m));
+                }
+              } else if (data.type === 'response') {
+                setMessages(prev => {
+                  const filtered = prev.filter(m => m.role !== 'thinking');
+                  return [...filtered, { id: assistantId, role: 'assistant', content: data.content, created_at: new Date().toISOString() }];
+                });
+              } else if (data.type === 'done') {
+                setMessages(prev => prev.filter(m => m.role !== 'thinking'));
+                if (data.total_tokens) {
+                  setStats({ tps: (data.total_tokens / data.elapsed).toFixed(1), ctx: data.total_tokens, tokens: data.total_tokens, elapsed: data.elapsed, iterations: data.iterations, mode: 'agent' });
+                }
+              }
+            } catch {}
+          }
+        }
+      } else {
+        // Chat mode: streaming chunks
+        let fullContent = '';
+        setMessages(prev => [...prev, { id: assistantId, role: 'assistant', content: '', created_at: new Date().toISOString() }]);
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop();
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (data.type === 'chunk') {
+                fullContent += data.content;
+                setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: fullContent } : m));
+              } else if (data.type === 'done' && data.eval_count) {
+                const tps = data.eval_duration > 0 ? (data.eval_count / (data.eval_duration / 1e9)).toFixed(1) : '?';
+                const ctx = (data.prompt_eval_count || 0) + (data.eval_count || 0);
+                setStats({ tps, ctx, tokens: data.eval_count, mode: 'chat' });
+              }
+            } catch {}
+          }
+        }
+      }
+    } catch (e) {
+      setMessages(prev => [...prev, { id: Date.now(), role: 'assistant', content: `Error: ${e.message}`, created_at: new Date().toISOString() }]);
+    }
+    setLoading(false);
+  };
+
+  const onKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      send();
+    }
+  };
+
+  if (!session) {
+    return (
+      <div style={{flex:1, display:'flex', alignItems:'center', justifyContent:'center', flexDirection:'column', gap:12, color:'var(--text3)'}}>
+        <div style={{fontSize:32}}>⚡</div>
+        <div style={{fontSize:16, color:'var(--text2)'}}>Select or create a session</div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="messages">
+        {messages.length === 0 && (
+          <div className="empty-state">
+            <div className="empty-icon">{session.mode === 'agent' ? '🤖' : '💬'}</div>
+            <div className="empty-title">{session.mode === 'agent' ? 'Agent ready' : 'Start chatting'}</div>
+            <div className="empty-sub">{session.mode === 'agent' ? 'Agent can run commands, read files, search the web' : 'Ask anything'}</div>
+          </div>
+        )}
+        {messages.map(msg => <Message key={msg.id} msg={msg} />)}
+        <div ref={bottomRef} />
+      </div>
+      {stats && (
+        <div className="stats-bar">
+          <span className="stat"><span>tokens</span><span className="stat-val">{stats.tokens}</span></span>
+          <span className="stat-sep">·</span>
+          <span className="stat"><span>ctx</span><span className="stat-val">{stats.ctx}</span></span>
+          <span className="stat-sep">·</span>
+          <span className="stat"><span>speed</span><span className="stat-val">{stats.tps} t/s</span></span>
+          {stats.elapsed && <><span className="stat-sep">·</span><span className="stat"><span>time</span><span className="stat-val">{stats.elapsed}s</span></span></>}
+          {stats.iterations && <><span className="stat-sep">·</span><span className="stat"><span>steps</span><span className="stat-val">{stats.iterations}</span></span></>}
+          <span className="stat-sep">·</span>
+          <span className="stat"><span>mode</span><span className="stat-val">{stats.mode}</span></span>
+        </div>
+      )}
+      <div className="input-area">
+        <div className="input-row">
+          <div className="input-wrap">
+            <textarea
+              ref={textareaRef}
+              className="input-box"
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={onKeyDown}
+              placeholder={session.mode === 'agent' ? 'Give the agent a task...' : 'Message...'}
+              rows={1}
+              style={{height: 'auto'}}
+              onInput={e => { e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px'; }}
+              disabled={loading}
+            />
+          </div>
+          {loading ? (
+            <button className="stop-btn" onClick={stop}>■ Stop</button>
+          ) : (
+            <button className="send-btn" onClick={send} disabled={!input.trim()}>Send</button>
+          )}
+        </div>
+        <div className="input-hint">Enter to send · Shift+Enter for new line</div>
+      </div>
+    </>
+  );
+}
+
+function MemoryView() {
+  const [memory, setMemory] = useState({ facts: [] });
+  const [input, setInput] = useState('');
+
+  const load = () => fetch(`${API}/api/memory`).then(r => r.json()).then(setMemory);
+  useEffect(() => { load(); }, []);
+
+  const add = async () => {
+    if (!input.trim()) return;
+    await fetch(`${API}/api/memory`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: input.trim() })
+    });
+    setInput('');
+    load();
+  };
+
+  const del = async (i) => {
+    await fetch(`${API}/api/memory/${i}`, { method: 'DELETE' });
+    load();
+  };
+
+  return (
+    <div className="memory-view">
+      <div className="memory-header">
+        <div className="memory-title">Memory</div>
+      </div>
+      <div style={{color:'var(--text2)', fontSize:12, lineHeight:1.6}}>
+        Facts stored here are injected into every conversation as context. The agent can also add and remove memories automatically.
+      </div>
+      <div className="memory-add">
+        <input
+          className="memory-input"
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && add()}
+          placeholder="Add a memory..."
+        />
+        <button className="add-btn" onClick={add}>Add</button>
+      </div>
+      <div className="memory-list">
+        {memory.facts.length === 0 && <div className="memory-empty">No memories yet</div>}
+        {memory.facts.map((f, i) => (
+          <div className="memory-item" key={i}>
+            <div style={{flex:1}}>
+              <div className="memory-content">{f.content}</div>
+              <div className="memory-date">{formatTime(f.created_at)}</div>
+            </div>
+            <div className="memory-del" onClick={() => del(i)}>✕</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+
+
+function ProjectSetupModal({ onClose, onCreated }) {
+  const [step, setStep] = useState(1); // 1=type, 2=remote(if ssh), 3=path+name, 4=scanning
+  const [type, setType] = useState(null); // 'local' | 'remote'
+  const [remotes, setRemotes] = useState([]);
+  const [selectedRemote, setSelectedRemote] = useState(null);
+  const [path, setPath] = useState('');
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [scanning, setScanning] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/remotes').then(r => r.json()).then(d => setRemotes(d.remotes || []));
+  }, []);
+
+  const goNext = () => {
+    if (step === 1) {
+      if (type === 'local') setStep(3);
+      else setStep(2);
+    } else if (step === 2) {
+      setStep(3);
+    } else if (step === 3) {
+      create();
+    }
+  };
+
+  const create = async () => {
+    setStep(4);
+    setScanning(true);
+    const project = {
+      name: name || path.split('/').pop(),
+      root: path,
+      remote: type === 'remote' ? selectedRemote?.name : null,
+      description,
+      ignore: ["venv", "node_modules", "__pycache__", ".git", "dist", "build", ".next"]
+    };
+    await fetch('/api/projects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(project)
+    });
+    // Trigger background scan
+    fetch(`/api/projects/${encodeURIComponent(project.name)}/scan`).catch(() => {});
+    setScanning(false);
+    onCreated(project);
+    onClose();
+  };
+
+  const canProceed = () => {
+    if (step === 1) return !!type;
+    if (step === 2) return !!selectedRemote;
+    if (step === 3) return !!path.trim();
+    return false;
+  };
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal" style={{width: 480}}>
+        <div className="modal-header">
+          <div className="modal-title">Add project</div>
+          <button className="modal-close" onClick={onClose}>✕</button>
+        </div>
+        <div className="modal-body">
+          {step === 1 && (
+            <div className="setup-step">
+              <div className="setup-title">Where is the project?</div>
+              <div className="setup-sub">Choose whether this project lives on this machine or on a remote machine.</div>
+              <div className="type-cards">
+                <div className={`type-card ${type === 'local' ? 'selected' : ''}`} onClick={() => setType('local')}>
+                  <div className="type-card-icon">💻</div>
+                  <div className="type-card-title">Local</div>
+                  <div className="type-card-desc">Project is on this machine</div>
+                </div>
+                <div className={`type-card ${type === 'remote' ? 'selected' : ''}`} onClick={() => setType('remote')}>
+                  <div className="type-card-icon">🌐</div>
+                  <div className="type-card-title">Remote (SSH)</div>
+                  <div className="type-card-desc">Project is on an SSH machine</div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {step === 2 && (
+            <div className="setup-step">
+              <div className="setup-title">Select a machine</div>
+              <div className="setup-sub">Choose which SSH machine the project is on.</div>
+              {remotes.length === 0 ? (
+                <div style={{color:'var(--text2)',fontSize:13,padding:'20px 0'}}>
+                  No SSH remotes configured. Add them in Settings → Remotes first.
+                </div>
+              ) : (
+                <div className="remote-cards">
+                  {remotes.map(r => (
+                    <div key={r.name} className={`remote-card ${selectedRemote?.name === r.name ? 'selected' : ''}`} onClick={() => setSelectedRemote(r)}>
+                      <div style={{fontSize:20}}>🖥</div>
+                      <div>
+                        <div className="remote-card-name">{r.name}</div>
+                        <div className="remote-card-host">{r.user ? `${r.user}@` : ''}{r.host}</div>
+                      </div>
+                      {selectedRemote?.name === r.name && <div style={{marginLeft:'auto',color:'var(--accent)'}}>✓</div>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {step === 3 && (
+            <div className="setup-step">
+              <div className="setup-title">Project details</div>
+              <div className="setup-sub">
+                {type === 'remote' ? `Path on ${selectedRemote?.name}` : 'Path on this machine'}
+              </div>
+              <div style={{display:'flex',flexDirection:'column',gap:10}}>
+                <div>
+                  <div className="form-label" style={{marginBottom:6}}>Project path</div>
+                  <input className="settings-input" value={path} onChange={e => setPath(e.target.value)} placeholder={type === 'remote' ? '/home/arne/myproject' : '/home/arne/myproject'} autoFocus />
+                </div>
+                <div>
+                  <div className="form-label" style={{marginBottom:6}}>Project name (optional)</div>
+                  <input className="settings-input" value={name} onChange={e => setName(e.target.value)} placeholder={path.split('/').pop() || 'my-project'} />
+                </div>
+                <div>
+                  <div className="form-label" style={{marginBottom:6}}>Description (optional)</div>
+                  <input className="settings-input" value={description} onChange={e => setDescription(e.target.value)} placeholder="What is this project?" />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {step === 4 && (
+            <div className="setup-step" style={{textAlign:'center',padding:'40px 20px'}}>
+              <div style={{fontSize:32,marginBottom:12}}>⚡</div>
+              <div className="setup-title">Setting up project</div>
+              <div className="setup-sub">Scanning structure and reading key files...</div>
+              {scanning && (
+                <div className="scanning-indicator" style={{justifyContent:'center'}}>
+                  <div className="thinking-dots"><div className="thinking-dot"/><div className="thinking-dot"/><div className="thinking-dot"/></div>
+                  scanning
+                </div>
+              )}
+            </div>
+          )}
+
+          {step < 4 && (
+            <div className="setup-nav" style={{padding:'0 20px 20px'}}>
+              <button className="settings-btn" onClick={() => step > 1 ? setStep(step - 1) : onClose()}>
+                {step === 1 ? 'Cancel' : '← Back'}
+              </button>
+              <button className="settings-btn primary" onClick={goNext} disabled={!canProceed()}>
+                {step === 3 ? 'Create project' : 'Next →'}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SettingsModal({ onClose }) {
+  const [tab, setTab] = useState('general');
+  const [settings, setSettings] = useState(null);
+  const [remotes, setRemotes] = useState([]);
+  const [showAddRemote, setShowAddRemote] = useState(false);
+  const [newRemote, setNewRemote] = useState({ name: '', host: '', user: '', port: '22', key_path: '', password: '', auth: 'key' });
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/settings').then(r => r.json()).then(setSettings);
+    fetch('/api/remotes').then(r => r.json()).then(d => setRemotes(d.remotes || []));
+  }, []);
+
+  const saveSettings = async () => {
+    await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings) });
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
+
+  const addRemote = async () => {
+    if (!newRemote.name || !newRemote.host) return;
+    const r = { ...newRemote, port: parseInt(newRemote.port) || 22 };
+    if (r.auth === 'key') delete r.password;
+    else delete r.key_path;
+    delete r.auth;
+    await fetch('/api/remotes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(r) });
+    fetch('/api/remotes').then(r => r.json()).then(d => setRemotes(d.remotes || []));
+    setNewRemote({ name: '', host: '', user: '', port: '22', key_path: '', password: '', auth: 'key' });
+    setShowAddRemote(false);
+  };
+
+  const deleteRemote = async (name) => {
+    await fetch(`/api/remotes/${name}`, { method: 'DELETE' });
+    setRemotes(prev => prev.filter(r => r.name !== name));
+  };
+
+  if (!settings) return null;
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal">
+        <div className="modal-header">
+          <div className="modal-title">Settings</div>
+          <button className="modal-close" onClick={onClose}>✕</button>
+        </div>
+        <div className="modal-tabs">
+          {['general', 'remotes', 'agent', 'prompts'].map(t => (
+            <div key={t} className={`modal-tab ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>{t}</div>
+          ))}
+        </div>
+        <div className="modal-body">
+          {tab === 'general' && (
+            <div>
+              <div className="settings-section">
+                <div className="settings-label">Your name</div>
+                <input className="settings-input" value={settings.user_name || ''} onChange={e => setSettings({...settings, user_name: e.target.value})} placeholder="Arne" />
+              </div>
+              <div className="settings-section">
+                <div className="settings-label">Ollama URL</div>
+                <input className="settings-input" value={settings.ollama_url || ''} onChange={e => setSettings({...settings, ollama_url: e.target.value})} placeholder="http://localhost:11434" />
+              </div>
+              <div className="settings-section">
+                <div className="settings-label">Default model</div>
+                <input className="settings-input" value={settings.default_model || ''} onChange={e => setSettings({...settings, default_model: e.target.value})} placeholder="deepseek-coder-v2:16b" />
+              </div>
+              <div className="settings-section">
+                <button className={`settings-btn primary`} onClick={saveSettings}>{saved ? '✓ Saved' : 'Save changes'}</button>
+              </div>
+            </div>
+          )}
+
+          {tab === 'remotes' && (
+            <div>
+              <div className="settings-section">
+                <div className="settings-label">SSH Remotes</div>
+                <div style={{fontSize:11,color:'var(--text3)',marginBottom:10,lineHeight:1.6}}>
+                  Add machines you want the agent to SSH into. Use the remote name in the agent: "ssh into mac-mini and list photos"
+                </div>
+                {remotes.map(r => (
+                  <div className="remote-item" key={r.name}>
+                    <div className="remote-header">
+                      <div>
+                        <div className="remote-name">{r.name}</div>
+                        <div className="remote-host">{r.user ? `${r.user}@` : ''}{r.host}:{r.port || 22}</div>
+                      </div>
+                      <span className="remote-del" onClick={() => deleteRemote(r.name)}>✕</span>
+                    </div>
+                    <div className="remote-badges">
+                      {r.has_key && <span className="badge-small badge-key">SSH key</span>}
+                      {r.has_password && <span className="badge-small badge-pass">password</span>}
+                      {r.key_path && <span style={{fontSize:10,color:'var(--text3)',fontFamily:'var(--font-mono)'}}>{r.key_path}</span>}
+                    </div>
+                  </div>
+                ))}
+                {!showAddRemote ? (
+                  <button className="settings-btn" style={{marginTop:8}} onClick={() => setShowAddRemote(true)}>+ Add remote</button>
+                ) : (
+                  <div className="add-remote-form">
+                    <div className="add-remote-title">New remote</div>
+                    <div className="form-grid">
+                      <div className="form-field">
+                        <div className="form-label">Name</div>
+                        <input className="settings-input" value={newRemote.name} onChange={e => setNewRemote({...newRemote, name: e.target.value})} placeholder="mac-mini" />
+                      </div>
+                      <div className="form-field">
+                        <div className="form-label">Host</div>
+                        <input className="settings-input" value={newRemote.host} onChange={e => setNewRemote({...newRemote, host: e.target.value})} placeholder="192.168.1.x or hostname" />
+                      </div>
+                      <div className="form-field">
+                        <div className="form-label">User</div>
+                        <input className="settings-input" value={newRemote.user} onChange={e => setNewRemote({...newRemote, user: e.target.value})} placeholder="arne" />
+                      </div>
+                      <div className="form-field">
+                        <div className="form-label">Port</div>
+                        <input className="settings-input" value={newRemote.port} onChange={e => setNewRemote({...newRemote, port: e.target.value})} placeholder="22" />
+                      </div>
+                    </div>
+                    <div className="settings-row" style={{marginBottom:8}}>
+                      <div className="form-label" style={{marginBottom:0}}>Auth:</div>
+                      <button className={`settings-btn ${newRemote.auth === 'key' ? 'primary' : ''}`} onClick={() => setNewRemote({...newRemote, auth: 'key'})}>SSH key</button>
+                      <button className={`settings-btn ${newRemote.auth === 'password' ? 'primary' : ''}`} onClick={() => setNewRemote({...newRemote, auth: 'password'})}>Password</button>
+                    </div>
+                    {newRemote.auth === 'key' && (
+                      <div className="form-field" style={{marginBottom:8}}>
+                        <div className="form-label">Key path (leave blank for default ~/.ssh/id_rsa)</div>
+                        <input className="settings-input" value={newRemote.key_path} onChange={e => setNewRemote({...newRemote, key_path: e.target.value})} placeholder="~/.ssh/id_rsa" />
+                      </div>
+                    )}
+                    {newRemote.auth === 'password' && (
+                      <div className="form-field" style={{marginBottom:8}}>
+                        <div className="form-label">Password</div>
+                        <input className="settings-input" type="password" value={newRemote.password} onChange={e => setNewRemote({...newRemote, password: e.target.value})} />
+                      </div>
+                    )}
+                    <div className="settings-row">
+                      <button className="settings-btn primary" onClick={addRemote}>Add remote</button>
+                      <button className="settings-btn" onClick={() => setShowAddRemote(false)}>Cancel</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {tab === 'agent' && (
+            <div>
+              <div className="settings-section">
+                <div className="settings-label">Max iterations</div>
+                <div style={{fontSize:11,color:'var(--text3)',marginBottom:8}}>How many tool calls the agent can make per message</div>
+                <input className="settings-input" type="number" value={settings.agent_max_iterations || 10} onChange={e => setSettings({...settings, agent_max_iterations: parseInt(e.target.value)})} />
+              </div>
+              <div className="settings-section">
+                <div className="settings-label">Timeout (seconds)</div>
+                <div style={{fontSize:11,color:'var(--text3)',marginBottom:8}}>Max time to wait for each model response</div>
+                <input className="settings-input" type="number" value={settings.agent_timeout || 120} onChange={e => setSettings({...settings, agent_timeout: parseInt(e.target.value)})} />
+              </div>
+              <div className="settings-section">
+                <button className="settings-btn primary" onClick={saveSettings}>{saved ? '✓ Saved' : 'Save changes'}</button>
+              </div>
+            </div>
+          )}
+
+          {tab === 'prompts' && (
+            <div>
+              <div className="settings-section">
+                <div className="settings-label">Chat system prompt (appended to default)</div>
+                <textarea className="settings-input" rows={4} style={{resize:'vertical'}} value={settings.system_prompt_chat || ''} onChange={e => setSettings({...settings, system_prompt_chat: e.target.value})} placeholder="Always respond in English. Be concise." />
+              </div>
+              <div className="settings-section">
+                <div className="settings-label">Agent system prompt (appended to default)</div>
+                <textarea className="settings-input" rows={4} style={{resize:'vertical'}} value={settings.system_prompt_agent || ''} onChange={e => setSettings({...settings, system_prompt_agent: e.target.value})} placeholder="My projects are in ~/projects. Prefer Python for scripts." />
+              </div>
+              <div className="settings-section">
+                <button className="settings-btn primary" onClick={saveSettings}>{saved ? '✓ Saved' : 'Save changes'}</button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function App() {
+  const [sessions, setSessions] = useState([]);
+  const [activeSession, setActiveSession] = useState(null);
+  const [models, setModels] = useState([]);
+  const [selectedModel, setSelectedModel] = useState('');
+  const [mode, setMode] = useState('chat');
+  const [view, setView] = useState('chat'); // 'chat' | 'memory'
+  const [showSettings, setShowSettings] = useState(false);
+  const [projects, setProjects] = useState([]);
+  const [activeProject, setActiveProject] = useState(null);
+  const [projectsOpen, setProjectsOpen] = useState(true);
+  const [showAddProject, setShowAddProject] = useState(false);
+
+  useEffect(() => {
+    fetch(`${API}/api/projects`).then(r => r.json()).then(d => setProjects(d.projects || []));
+    fetch(`${API}/api/models`).then(r => r.json()).then(d => {
+      setModels(d.models || []);
+      setSelectedModel(d.default || d.models?.[0] || '');
+    });
+    loadSessions();
+  }, []);
+
+  const loadSessions = () => {
+    fetch(`${API}/api/sessions`).then(r => r.json()).then(d => setSessions(d.sessions || []));
+  };
+
+  const newSession = async () => {
+    const res = await fetch(`${API}/api/sessions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'New Chat', mode, model: selectedModel })
+    });
+    const { id } = await res.json();
+    await loadSessions();
+    const allSessions = await fetch(`${API}/api/sessions`).then(r => r.json());
+    const s = allSessions.sessions.find(s => s.id === id);
+    setActiveSession(s);
+    setView('chat');
+  };
+
+  const deleteProject = async (e, name) => {
+    e.stopPropagation();
+    await fetch(`${API}/api/projects/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    if (activeProject?.name === name) setActiveProject(null);
+    setProjects(prev => prev.filter(p => p.name !== name));
+  };
+
+  const deleteSession = async (e, id) => {
+    e.stopPropagation();
+    await fetch(`${API}/api/sessions/${id}`, { method: 'DELETE' });
+    if (activeSession?.id === id) setActiveSession(null);
+    loadSessions();
+  };
+
+  const currentSession = activeSession ? { ...activeSession, mode, project: activeProject?.name || null } : null;
+
+  return (
+    <div className="layout">
+      <div className="sidebar">
+        <div className="sidebar-header">
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+            <div className="logo">ai<span>/</span>workspace</div>
+            <button className="gear-btn" onClick={() => setShowSettings(true)} title="Settings">⚙</button>
+          </div>
+          <div className="mode-tabs">
+            <button className={`mode-tab ${mode === 'chat' ? 'active' : ''}`} onClick={() => setMode('chat')}>chat</button>
+            <button className={`mode-tab ${mode === 'agent' ? 'active' : ''}`} onClick={() => setMode('agent')}>agent</button>
+            <button className={`mode-tab ${view === 'memory' ? 'active' : ''}`} onClick={() => setView(view === 'memory' ? 'chat' : 'memory')}>mem</button>
+          </div>
+        </div>
+
+        <div className="sidebar-section">Sessions</div>
+        <button className="new-chat-btn" onClick={newSession}>
+          <span>+</span> New {mode === 'agent' ? 'agent' : 'chat'}
+        </button>
+
+        <div className="session-list">
+          {sessions.map(s => (
+            <div
+              key={s.id}
+              className={`session-item ${activeSession?.id === s.id ? 'active' : ''}`}
+              onClick={() => { setActiveSession(s); setView('chat'); }}
+            >
+              <span className="session-title">{s.title}</span>
+              <span className={`session-mode ${s.mode}`}>{s.mode}</span>
+              <span className="session-delete" onClick={e => deleteSession(e, s.id)}>✕</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="project-panel">
+          <div className="project-panel-header" onClick={() => setProjectsOpen(o => !o)}>
+            <span className="project-panel-title">Projects</span>
+            <span className="project-toggle">{projectsOpen ? '▾' : '▸'}</span>
+          </div>
+          {projectsOpen && (
+            <>
+              <div className="project-list">
+                {projects.map(p => (
+                  <div key={p.name} className={`project-item ${activeProject?.name === p.name ? 'active' : ''}`}
+                    onClick={() => setActiveProject(activeProject?.name === p.name ? null : p)}>
+                    <div className="project-item-header">
+                      <span className="project-name">{p.name}</span>
+                      <div style={{display:'flex',alignItems:'center',gap:4}}>
+                        <span className={p.remote ? 'project-remote-badge' : 'project-local-badge'}>
+                          {p.remote || 'local'}
+                        </span>
+                        <span className="project-del" onClick={e => deleteProject(e, p.name)}>✕</span>
+                      </div>
+                    </div>
+                    <div className="project-path">{p.root}</div>
+                  </div>
+                ))}
+              </div>
+              <button className="add-project-btn" onClick={() => setShowAddProject(true)}>
+                <span>+</span> Add project
+              </button>
+            </>
+          )}
+        </div>
+        <div className="sidebar-bottom">
+          <select className="model-select" value={selectedModel} onChange={e => setSelectedModel(e.target.value)}>
+            {models.map(m => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <div className="main">
+        {view !== 'memory' && (
+          <div className="topbar">
+            <div className="topbar-title">{activeSession?.title || 'ai/workspace'}</div>
+            <div className={`topbar-mode ${mode}`}>{mode}</div>
+          </div>
+        )}
+        {activeProject && view !== 'memory' && (
+          <div className="active-project-bar">
+            <span>📁</span>
+            <span className="active-project-name">{activeProject.name}</span>
+            <span className="active-project-path">
+              {activeProject.remote ? `${activeProject.remote}:` : ''}{activeProject.root}
+            </span>
+            <span className="active-project-close" onClick={() => setActiveProject(null)} title="Close project">✕</span>
+          </div>
+        )}
+        {view === 'memory' ? (
+          <MemoryView />
+        ) : (
+          <ChatView session={currentSession} model={selectedModel} />
+        )}
+      </div>
+      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+      {showAddProject && (
+        <ProjectSetupModal
+          onClose={() => setShowAddProject(false)}
+          onCreated={p => { setProjects(prev => [...prev.filter(x => x.name !== p.name), p]); setActiveProject(p); }}
+        />
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

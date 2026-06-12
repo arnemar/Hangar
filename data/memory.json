@@ -1,0 +1,18 @@
+{
+  "facts": [
+    {
+      "content": "This machine is the Lenovo laptop running Pop!_OS. Use the shell tool for local searches.",
+      "created_at": "2026-06-12T20:21:19.578188"
+    },
+    {
+      "content": "mac-mini is an SSH remote. Use the ssh tool with remote=\"mac-mini\" to run commands on it.",
+      "created_at": "2026-06-12T20:21:41.797450"
+    },
+    {
+      "content": "When asked to find a file across machines, use shell for local and ssh for each remote sequentially.",
+      "created_at": "2026-06-12T20:21:53.957228"
+    }
+  ],
+  "preferences": {},
+  "updated_at": "2026-06-12T20:21:53.957241"
+}
