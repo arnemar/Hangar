@@ -10,7 +10,7 @@ Lightweight local AI workspace. Chat + Agent + Memory. Works on Linux and Window
 
 ### Linux / macOS
 ```bash
-git clone <your-repo>
+git clone git@github.com:arnemar/Hangar.git
 cd ai_workspace
 python3 -m venv venv
 source venv/bin/activate
@@ -20,7 +20,7 @@ python app.py
 
 ### Windows (PowerShell)
 ```powershell
-git clone <your-repo>
+git clone git@github.com:arnemar/Hangar.git
 cd ai_workspace
 python -m venv venv
 .\venv\Scripts\activate
