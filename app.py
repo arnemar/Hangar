@@ -365,6 +365,7 @@ def load_settings() -> dict:
         "default_model": "deepseek-coder-v2:16b",
         "agent_max_iterations": 5,
         "agent_timeout": 120,
+        "context_length": 8192,
         "remotes": [],
         "user_name": "",
         "system_prompt_chat": "",
@@ -447,6 +448,11 @@ def tool_ssh(remote: str, command: str, path: str = "") -> str:
         else:
             ssh_opts = ssh_base
 
+        # In read-only mode, block write commands
+        dangerous = ['rm ', 'mv ', 'cp ', 'mkdir ', 'touch ', 'chmod ', 'chown ', 'dd ', '>', '>>', 'sudo ', 'apt ', 'pip ', 'npm ']
+        if getattr(tool_ssh, '_readonly', False) and any(d in command for d in dangerous):
+            return "[error]: Write operations not allowed in research mode"
+
         proc = subprocess.Popen(ssh_opts, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         try:
             stdout, stderr = proc.communicate(timeout=30)
@@ -475,7 +481,12 @@ def tool_ssh(remote: str, command: str, path: str = "") -> str:
         return f"[error]: {e}"
 
 
-def get_tool_schemas():
+# Tools allowed in research/read-only mode
+READ_ONLY_TOOLS = {"web_search", "read_file", "list_dir", "http_request", "git", "ssh"}
+
+def get_tool_schemas(mode: str = "agent") -> list:
+    if mode == "research":
+        return [t["schema"] for name, t in TOOLS.items() if name in READ_ONLY_TOOLS]
     return [t["schema"] for t in TOOLS.values()]
 
 
@@ -504,11 +515,12 @@ async def get_models() -> list[str]:
         return []
 
 
-async def stream_ollama(messages: list, model: str, tools: list = None) -> AsyncGenerator[str, None]:
+async def stream_ollama(messages: list, model: str, tools: list = None, num_ctx: int = 8192) -> AsyncGenerator[str, None]:
     payload = {
         "model": model,
         "messages": messages,
         "stream": True,
+        "options": {"num_ctx": num_ctx},
     }
     if tools:
         payload["tools"] = tools
@@ -520,12 +532,13 @@ async def stream_ollama(messages: list, model: str, tools: list = None) -> Async
                     yield line
 
 
-async def chat_ollama(messages: list, model: str, tools: list = None, cancel_event=None) -> dict:
+async def chat_ollama(messages: list, model: str, tools: list = None, cancel_event=None, num_ctx: int = 8192) -> dict:
     """Chat with Ollama using streaming internally so we can cancel mid-generation."""
     payload = {
         "model": model,
         "messages": messages,
         "stream": True,  # Stream so we can cancel
+        "options": {"num_ctx": num_ctx},
     }
     if tools:
         payload["tools"] = tools
@@ -644,6 +657,7 @@ async def chat(req: ChatRequest):
     model = req.model or s.get("default_model", DEFAULT_MODEL)
     custom_chat_prompt = s.get("system_prompt_chat", "")
     user_name = s.get("user_name", "")
+    num_ctx = s.get("context_length", 8192)
 
     # Load session history
     with get_db() as conn:
@@ -682,7 +696,7 @@ async def chat(req: ChatRequest):
     async def generate():
         full_response = ""
         try:
-            async for line in stream_ollama(messages, model):
+            async for line in stream_ollama(messages, model, num_ctx=num_ctx):
                 try:
                     data = json.loads(line)
                     if data.get("message", {}).get("content"):
@@ -690,7 +704,6 @@ async def chat(req: ChatRequest):
                         full_response += chunk
                         yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
                     if data.get("done"):
-                        # Save assistant message
                         with get_db() as conn:
                             conn.execute(
                                 "INSERT INTO messages VALUES (?,?,?,?,?,?,?)",
@@ -730,6 +743,7 @@ async def agent(req: AgentRequest):
     memory = load_memory()
     max_iterations = s.get("agent_max_iterations", MAX_TOOL_ITERATIONS)
     agent_timeout = s.get("agent_timeout", 120)
+    num_ctx = s.get("context_length", 8192)
     user_name = s.get("user_name", "")
     custom_agent_prompt = s.get("system_prompt_agent", "")
 
@@ -932,7 +946,7 @@ For questions about this project, use the above context first before making tool
             yield f"data: {json.dumps({'type': 'thinking', 'iteration': iteration})}\n\n"
 
             try:
-                response = await chat_ollama(messages, model, cancel_event=cancel_event)
+                response = await chat_ollama(messages, model, cancel_event=cancel_event, num_ctx=num_ctx)
                 if response.get("cancelled"):
                     yield f"data: {json.dumps({'type': 'cancelled'})}\n\n"
                     finish_request(req_id)
@@ -988,7 +1002,7 @@ For questions about this project, use the above context first before making tool
                     force_messages = [m for m in messages if m.get("role") != "system"]
                     force_messages.insert(0, {"role": "system", "content": "You are a helpful assistant. Answer the user's question directly and concisely based on the information gathered. Do not output JSON. Do not use tools. Just answer."})
                     try:
-                        forced = await chat_ollama(force_messages, model, cancel_event=cancel_event)
+                        forced = await chat_ollama(force_messages, model, cancel_event=cancel_event, num_ctx=num_ctx)
                         if not forced.get("cancelled"):
                             final_response = forced.get("message", {}).get("content", "").strip()
                             if final_response:
@@ -1019,7 +1033,7 @@ For questions about this project, use the above context first before making tool
                 "content": "You have reached the maximum number of tool calls. Based ONLY on what you have already gathered, give your final answer now. Do not use any more tools."
             })
             try:
-                response = await chat_ollama(messages, model, cancel_event=cancel_event)
+                response = await chat_ollama(messages, model, cancel_event=cancel_event, num_ctx=num_ctx)
                 final_response = response.get("message", {}).get("content", "")
                 if not final_response:
                     final_response = f"Reached tool call limit ({max_iterations} steps). Here is what I found:\n" + "\n".join(f"- {r[:200]}" for r in all_tool_results[:3])

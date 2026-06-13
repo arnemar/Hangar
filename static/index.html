@@ -75,6 +75,8 @@
   .topbar-mode { font-size: 10px; font-family: var(--font-mono); padding: 3px 8px; border-radius: 3px; }
   .topbar-mode.chat { background: rgba(77,159,255,0.15); color: var(--blue); border: 1px solid rgba(77,159,255,0.2); }
   .topbar-mode.agent { background: rgba(176,108,255,0.15); color: var(--purple); border: 1px solid rgba(176,108,255,0.2); }
+  .topbar-mode.research { background: rgba(77,159,255,0.15); color: var(--blue); border: 1px solid rgba(77,159,255,0.2); }
+  .session-mode.research { background: rgba(77,159,255,0.15); color: var(--blue); }
 
   /* Messages */
   .messages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
@@ -278,6 +280,21 @@
   .browser-select-btn:hover { background: var(--accent2); }
   .browser-loading { padding: 20px; text-align: center; color: var(--text3); font-size: 12px; font-family: var(--font-mono); }
   .browser-selected-path { padding: 8px 10px; background: rgba(0,212,170,0.05); border: 1px solid rgba(0,212,170,0.3); border-radius: var(--radius); font-size: 11px; font-family: var(--font-mono); color: var(--accent); margin-top: 8px; word-break: break-all; }
+
+  /* Markdown rendering */
+  .message-bubble h1, .message-bubble h2, .message-bubble h3 { font-weight: 600; margin: 10px 0 4px; line-height: 1.3; }
+  .message-bubble h1 { font-size: 16px; }
+  .message-bubble h2 { font-size: 14px; }
+  .message-bubble h3 { font-size: 13px; color: var(--text2); }
+  .message-bubble p { margin: 4px 0; line-height: 1.6; }
+  .message-bubble ul, .message-bubble ol { padding-left: 18px; margin: 4px 0; }
+  .message-bubble li { margin: 2px 0; line-height: 1.6; }
+  .message-bubble strong { font-weight: 600; color: var(--text); }
+  .message-bubble em { font-style: italic; color: var(--text2); }
+  .message-bubble hr { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
+  .message-bubble blockquote { border-left: 3px solid var(--border2); padding-left: 10px; color: var(--text2); margin: 4px 0; }
+  .message.user .message-bubble strong { color: #000; }
+  .message.user .message-bubble em { color: rgba(0,0,0,0.7); }
 </style>
 </head>
 <body>
@@ -293,21 +310,82 @@ function formatTime(iso) {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+function renderInline(text) {
+  // Render inline markdown: bold, italic, code
+  const parts = text.split(/(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/g);
+  return parts.map((p, i) => {
+    if (p.startsWith('**') && p.endsWith('**')) return <strong key={i}>{p.slice(2,-2)}</strong>;
+    if (p.startsWith('*') && p.endsWith('*')) return <em key={i}>{p.slice(1,-1)}</em>;
+    if (p.startsWith('`') && p.endsWith('`')) return <code key={i}>{p.slice(1,-1)}</code>;
+    return p;
+  });
+}
+
 function renderContent(text) {
   if (!text) return null;
-  const parts = text.split(/(```[\s\S]*?```|`[^`]+`)/g);
-  return parts.map((part, i) => {
-    if (part.startsWith('```')) {
-      const lines = part.slice(3, -3).split('\n');
-      const lang = lines[0];
-      const code = lines.slice(1).join('\n');
-      return <pre key={i}><code>{code || lang}</code></pre>;
+
+  // Split on code blocks first
+  const blocks = text.split(/(```[\s\S]*?```)/g);
+  const result = [];
+
+  blocks.forEach((block, bi) => {
+    if (block.startsWith('```')) {
+      const lines = block.slice(3, -3).split('\n');
+      const lang = lines[0].trim();
+      const code = lines.slice(lang ? 1 : 0).join('\n');
+      result.push(<pre key={bi}><code>{code || lang}</code></pre>);
+      return;
     }
-    if (part.startsWith('`') && part.endsWith('`')) {
-      return <code key={i}>{part.slice(1, -1)}</code>;
+
+    // Process line by line
+    const lines = block.split('\n');
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i];
+
+      // Headings
+      if (line.startsWith('### ')) { result.push(<h3 key={`${bi}-${i}`}>{renderInline(line.slice(4))}</h3>); i++; continue; }
+      if (line.startsWith('## ')) { result.push(<h2 key={`${bi}-${i}`}>{renderInline(line.slice(3))}</h2>); i++; continue; }
+      if (line.startsWith('# ')) { result.push(<h1 key={`${bi}-${i}`}>{renderInline(line.slice(2))}</h1>); i++; continue; }
+
+      // Horizontal rule
+      if (/^---+$/.test(line.trim())) { result.push(<hr key={`${bi}-${i}`} />); i++; continue; }
+
+      // Blockquote
+      if (line.startsWith('> ')) { result.push(<blockquote key={`${bi}-${i}`}>{renderInline(line.slice(2))}</blockquote>); i++; continue; }
+
+      // Unordered list
+      if (/^[-*] /.test(line)) {
+        const items = [];
+        while (i < lines.length && /^[-*] /.test(lines[i])) {
+          items.push(<li key={i}>{renderInline(lines[i].slice(2))}</li>);
+          i++;
+        }
+        result.push(<ul key={`${bi}-ul-${i}`}>{items}</ul>);
+        continue;
+      }
+
+      // Ordered list
+      if (/^\d+\. /.test(line)) {
+        const items = [];
+        while (i < lines.length && /^\d+\. /.test(lines[i])) {
+          items.push(<li key={i}>{renderInline(lines[i].replace(/^\d+\. /, ''))}</li>);
+          i++;
+        }
+        result.push(<ol key={`${bi}-ol-${i}`}>{items}</ol>);
+        continue;
+      }
+
+      // Empty line — spacing
+      if (line.trim() === '') { i++; continue; }
+
+      // Regular paragraph
+      result.push(<p key={`${bi}-${i}`}>{renderInline(line)}</p>);
+      i++;
     }
-    return <span key={i}>{part}</span>;
   });
+
+  return result;
 }
 
 function ToolBlock({ call, result }) {
@@ -414,7 +492,8 @@ function ChatView({ session, model, onRunning, stopRef, draftInput, setDraftInpu
     setLoading(true); loadingRef.current = true; onRunning && onRunning(true);
 
     const userMsg = { id: Date.now(), role: 'user', content: text, created_at: new Date().toISOString() };
-    setMessages(prev => [...prev, userMsg]);
+    const thinkingId = `thinking-${Date.now()}`;
+    setMessages(prev => [...prev, userMsg, { id: thinkingId, role: 'thinking' }]);
 
     const endpoint = session.mode === 'agent' ? '/api/agent' : '/api/chat';
 
@@ -426,7 +505,7 @@ function ChatView({ session, model, onRunning, stopRef, draftInput, setDraftInpu
         res = await fetch(`${API}${endpoint}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ session_id: session.id, message: text, model, project: session.project || null }),
+          body: JSON.stringify({ session_id: session.id, message: text, model, project: session.project || null, mode: session.mode || 'agent' }),
           signal: controller.signal
         });
       } catch (e) {
@@ -460,7 +539,7 @@ function ChatView({ session, model, onRunning, stopRef, draftInput, setDraftInpu
               if (data.type === 'thinking') {
                 setMessages(prev => {
                   const filtered = prev.filter(m => m.role !== 'thinking');
-                  return [...filtered, { id: 'thinking', role: 'thinking' }];
+                  return [...filtered, { id: thinkingId, role: 'thinking' }];
                 });
               } else if (data.type === 'tool_call') {
                 const tcId = `tc-${Date.now()}-${Math.random()}`;
@@ -482,10 +561,10 @@ function ChatView({ session, model, onRunning, stopRef, draftInput, setDraftInpu
               } else if (data.type === 'request_id') {
                 requestIdRef.current = data.id;
               } else if (data.type === 'cancelled') {
-                setMessages(prev => prev.filter(m => m.role !== 'thinking'));
+                setMessages(prev => prev.filter(m => m.role === 'user' || m.role === 'assistant' || m.role === 'tool_call'));
               } else if (data.type === 'done') {
                 requestIdRef.current = null;
-                setMessages(prev => prev.filter(m => m.role !== 'thinking'));
+                setMessages(prev => prev.filter(m => m.role === 'user' || m.role === 'assistant' || m.role === 'tool_call'));
                 if (data.total_tokens) {
                   setStats({ tps: (data.total_tokens / data.elapsed).toFixed(1), ctx: data.total_tokens, tokens: data.total_tokens, elapsed: data.elapsed, iterations: data.iterations, mode: 'agent' });
                 }
@@ -496,8 +575,6 @@ function ChatView({ session, model, onRunning, stopRef, draftInput, setDraftInpu
       } else {
         // Chat mode: streaming chunks
         let fullContent = '';
-        // Show thinking indicator while waiting for first chunk
-        setMessages(prev => [...prev, { id: 'thinking-chat', role: 'thinking' }]);
         let firstChunk = true;
         while (true) {
           const { done, value } = await reader.read();
@@ -514,14 +591,14 @@ function ChatView({ session, model, onRunning, stopRef, draftInput, setDraftInpu
                 if (firstChunk) {
                   firstChunk = false;
                   setMessages(prev => {
-                    const filtered = prev.filter(m => m.id !== 'thinking-chat');
+                    const filtered = prev.filter(m => m.id !== thinkingId);
                     return [...filtered, { id: assistantId, role: 'assistant', content: fullContent, created_at: new Date().toISOString() }];
                   });
                 } else {
                   setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: fullContent } : m));
                 }
               } else if (data.type === 'done') {
-                setMessages(prev => prev.filter(m => m.id !== 'thinking-chat'));
+                setMessages(prev => prev.filter(m => m.id !== thinkingId));
                 if (data.eval_count) {
                   const tps = data.eval_duration > 0 ? (data.eval_count / (data.eval_duration / 1e9)).toFixed(1) : '?';
                   const ctx = (data.prompt_eval_count || 0) + (data.eval_count || 0);
@@ -533,8 +610,11 @@ function ChatView({ session, model, onRunning, stopRef, draftInput, setDraftInpu
         }
       }
     } catch (e) {
-      setMessages(prev => [...prev, { id: Date.now(), role: 'assistant', content: `Error: ${e.message}`, created_at: new Date().toISOString() }]);
+      if (e.name !== 'AbortError') {
+        setMessages(prev => [...prev.filter(m => m.id !== thinkingId), { id: Date.now(), role: 'assistant', content: `Error: ${e.message}`, created_at: new Date().toISOString() }]);
+      }
     }
+    setMessages(prev => prev.filter(m => m.id !== thinkingId));
     setLoading(false); loadingRef.current = false; onRunning && onRunning(false);
   };
 
@@ -561,7 +641,7 @@ function ChatView({ session, model, onRunning, stopRef, draftInput, setDraftInpu
           <div className="empty-state">
             <div className="empty-icon">{session.mode === 'agent' ? '🤖' : '💬'}</div>
             <div className="empty-title">{session.mode === 'agent' ? 'Agent ready' : 'Start chatting'}</div>
-            <div className="empty-sub">{session.mode === 'agent' ? 'Agent can run commands, read files, search the web' : 'Ask anything'}</div>
+            <div className="empty-sub">{session.mode === 'agent' ? 'Full tool access — runs commands, writes files, searches web' : 'Ask anything. Use agent mode for web search and file tasks.'}</div>
           </div>
         )}
         {messages.map(msg => <Message key={msg.id} msg={msg} />)}
@@ -979,6 +1059,17 @@ function SettingsModal({ onClose }) {
               <div className="settings-section">
                 <div className="settings-label">Default model</div>
                 <input className="settings-input" value={settings.default_model || ''} onChange={e => setSettings({...settings, default_model: e.target.value})} placeholder="deepseek-coder-v2:16b" />
+              </div>
+              <div className="settings-section">
+                <div className="settings-label">Context length (tokens)</div>
+                <div style={{fontSize:11,color:'var(--text3)',marginBottom:8}}>Higher = better memory but slower first response. 8192 recommended for CPU, 32768 for GPU.</div>
+                <select className="settings-input" value={settings.context_length || 8192} onChange={e => setSettings({...settings, context_length: parseInt(e.target.value)})}>
+                  <option value={4096}>4096 — fastest, least memory</option>
+                  <option value={8192}>8192 — recommended (default)</option>
+                  <option value={16384}>16384 — better for large projects</option>
+                  <option value={32768}>32768 — GPU recommended</option>
+                  <option value={65536}>65536 — GPU only</option>
+                </select>
               </div>
               <div className="settings-section">
                 <button className={`settings-btn primary`} onClick={saveSettings}>{saved ? '✓ Saved' : 'Save changes'}</button>
