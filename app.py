@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import AsyncGenerator, Optional
 
 import httpx
+import threading
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
@@ -36,7 +37,46 @@ MEMORY_PATH = DATA_DIR / "memory.json"
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "deepseek-coder-v2:16b")
-MAX_TOOL_ITERATIONS = 10
+MAX_TOOL_ITERATIONS = 5
+
+
+# ---------------------------------------------------------------------------
+# Cancellation system
+# ---------------------------------------------------------------------------
+
+import threading
+
+_active_requests: dict[str, threading.Event] = {}
+_active_procs: dict[str, list] = {}  # request_id -> list of subprocesses
+
+def register_request(request_id: str) -> threading.Event:
+    cancel_event = threading.Event()
+    _active_requests[request_id] = cancel_event
+    _active_procs[request_id] = []
+    return cancel_event
+
+def cancel_request(request_id: str):
+    if request_id in _active_requests:
+        _active_requests[request_id].set()
+    if request_id in _active_procs:
+        for proc in _active_procs[request_id]:
+            try:
+                proc.kill()
+                proc.communicate()
+            except Exception:
+                pass
+
+def finish_request(request_id: str):
+    _active_requests.pop(request_id, None)
+    _active_procs.pop(request_id, None)
+
+def track_proc(request_id: str, proc):
+    if request_id in _active_procs:
+        _active_procs[request_id].append(proc)
+
+def is_cancelled(request_id: str) -> bool:
+    event = _active_requests.get(request_id)
+    return event.is_set() if event else False
 
 # ---------------------------------------------------------------------------
 # Database
@@ -323,7 +363,7 @@ def load_settings() -> dict:
     defaults = {
         "ollama_url": "http://localhost:11434",
         "default_model": "deepseek-coder-v2:16b",
-        "agent_max_iterations": 10,
+        "agent_max_iterations": 5,
         "agent_timeout": 120,
         "remotes": [],
         "user_name": "",
@@ -480,18 +520,46 @@ async def stream_ollama(messages: list, model: str, tools: list = None) -> Async
                     yield line
 
 
-async def chat_ollama(messages: list, model: str, tools: list = None) -> dict:
+async def chat_ollama(messages: list, model: str, tools: list = None, cancel_event=None) -> dict:
+    """Chat with Ollama using streaming internally so we can cancel mid-generation."""
     payload = {
         "model": model,
         "messages": messages,
-        "stream": False,
+        "stream": True,  # Stream so we can cancel
     }
     if tools:
         payload["tools"] = tools
 
+    full_content = ""
+    final_data = {}
+
     async with httpx.AsyncClient(timeout=120) as client:
-        r = await client.post(f"{OLLAMA_URL}/api/chat", json=payload)
-        return r.json()
+        async with client.stream("POST", f"{OLLAMA_URL}/api/chat", json=payload) as response:
+            async for line in response.aiter_lines():
+                # Check cancel at every chunk
+                if cancel_event and cancel_event.is_set():
+                    await response.aclose()
+                    return {"message": {"content": full_content}, "cancelled": True}
+                if not line.strip():
+                    continue
+                try:
+                    data = json.loads(line)
+                    if data.get("message", {}).get("content"):
+                        full_content += data["message"]["content"]
+                    if data.get("done"):
+                        final_data = data
+                        break
+                except json.JSONDecodeError:
+                    pass
+
+    # Reconstruct a non-streaming style response
+    return {
+        "message": {"content": full_content},
+        "eval_count": final_data.get("eval_count", 0),
+        "prompt_eval_count": final_data.get("prompt_eval_count", 0),
+        "eval_duration": final_data.get("eval_duration", 0),
+        "total_duration": final_data.get("total_duration", 0),
+    }
 
 # ---------------------------------------------------------------------------
 # App
@@ -652,7 +720,8 @@ class AgentRequest(BaseModel):
     session_id: str
     message: str
     model: Optional[str] = None
-    project: Optional[str] = None  # Active project name
+    project: Optional[str] = None
+    request_id: Optional[str] = None  # For cancellation
 
 @app.post("/api/agent")
 async def agent(req: AgentRequest):
@@ -675,7 +744,15 @@ async def agent(req: AgentRequest):
     tools_text = "\n".join(tool_descriptions)
     home_dir = str(Path.home())
 
-    system_prompt = f"""You are an AI agent with access to tools. Use tools to accomplish tasks.
+    system_prompt = f"""You are an AI agent. You MUST use tools to accomplish tasks — never describe what you would do, just do it.
+
+CRITICAL RULES:
+- If the user asks you to CREATE a file → call write_file immediately. Do not explain, just write the file.
+- If the user asks you to RUN a command → call shell immediately.
+- If the user asks you to READ a file → call read_file immediately.
+- If the user asks you to FIND something → call shell or list_dir immediately.
+- Never say "I will create..." or "I would run..." — just use the tool.
+- Action first, explanation after.
 
 The user home directory is: {home_dir}
 When listing the home directory always use path: {home_dir}
@@ -699,23 +776,55 @@ Rules:
 - Run multiple tool calls if needed to fully explore — don't give up after one ls
 - When asked to "look at", "describe", or "understand" a folder or project: first list the directory, then read key files (README, main script, config) before answering
 - Never describe files you haven't read — always read_file on relevant files before giving a description
-- A directory listing alone is never enough to describe what something does — you must read the actual files"""
+- A directory listing alone is never enough to describe what something does — you must read the actual files
+- For large projects: read README first, then at most 1-2 other key files (app.py, main.py, package.json) — do NOT read every file, summarize based on what you have
+- After reading 2-3 files, give your answer — do not keep looping to read more unless the user explicitly asks for more detail
+- If a file is very large (>10KB), read it but only use the first part for your summary"""
 
-    # Inject project context if active
+    # Inject project context if active — pre-read key files so agent doesn't need to
     if req.project:
         proj = get_project(req.project)
         if proj:
             proj_root = proj.get("root", "")
             proj_remote = proj.get("remote", "")
             proj_loc = f"{proj_remote}:{proj_root}" if proj_remote else proj_root
+            ignore = proj.get("ignore", ["venv", "node_modules", "__pycache__", ".git", "dist", "build"])
+
+            # Get compact directory structure (dirs only, no hidden)
+            if proj_remote:
+                struct_cmd = f"find {proj_root} -maxdepth 2 -type d 2>/dev/null | grep -v '/.' | head -30"
+                structure = tool_ssh(proj_remote, struct_cmd)
+            else:
+                try:
+                    p = Path(proj_root)
+                    dirs = [i.name for i in sorted(p.iterdir()) if i.is_dir() and not i.name.startswith('.') and i.name not in ignore]
+                    files = [i.name for i in sorted(p.iterdir()) if i.is_file() and not i.name.startswith('.')]
+                    structure = "Dirs: " + ", ".join(dirs[:20]) + "\nFiles: " + ", ".join(files[:20])
+                except Exception:
+                    structure = "(could not read structure)"
+
+            # Pre-read README
+            readme_content = ""
+            for readme in ["README.md", "readme.md", "README.txt"]:
+                content_read = read_project_file(proj, readme)
+                if not content_read.startswith("[error]"):
+                    readme_content = content_read[:2000]
+                    break
+
             system_prompt += f"""
 
 Active project: {proj.get("name")}
 Location: {proj_loc}
-{"Remote: use ssh tool with remote=\"" + proj_remote + "\" for all file operations in this project" if proj_remote else "Local: use shell/read_file/write_file/edit_file for file operations"}
+{"SSH remote — use ssh tool with remote=\"" + proj_remote + "\" for file operations" if proj_remote else "Local — use read_file/write_file/edit_file/shell for file operations"}
 Stay within {proj_root} unless explicitly asked to go elsewhere.
-When editing files, read the current content first then use edit_file.
-When asked about the project structure, use {"ssh to run ls/find in " + proj_root if proj_remote else "list_dir on " + proj_root}."""
+When editing files, always read current content first then use edit_file.
+
+Project structure:
+{structure[:800]}
+
+{"README:\n" + readme_content if readme_content else ""}
+
+For questions about this project, use the above context first before making tool calls. Only use tools if you need more specific information."""
 
     if user_name:
         system_prompt += f"\n\nThe user's name is {user_name}."
@@ -801,6 +910,9 @@ When asked about the project structure, use {"ssh to run ls/find in " + proj_roo
                 pass
         return None
 
+    req_id = req.request_id or str(uuid.uuid4())
+    cancel_event = register_request(req_id)
+
     async def run_agent():
         all_tool_calls = []
         all_tool_results = []
@@ -811,10 +923,20 @@ When asked about the project structure, use {"ssh to run ls/find in " + proj_roo
 
         while iteration < max_iterations:
             iteration += 1
+
+            # Check for cancellation
+            if is_cancelled(req_id):
+                yield f"data: {json.dumps({'type': 'cancelled'})}\n\n"
+                break
+
             yield f"data: {json.dumps({'type': 'thinking', 'iteration': iteration})}\n\n"
 
             try:
-                response = await chat_ollama(messages, model)  # No tools= param
+                response = await chat_ollama(messages, model, cancel_event=cancel_event)
+                if response.get("cancelled"):
+                    yield f"data: {json.dumps({'type': 'cancelled'})}\n\n"
+                    finish_request(req_id)
+                    return
             except Exception as e:
                 yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
                 return
@@ -843,6 +965,11 @@ When asked about the project structure, use {"ssh to run ls/find in " + proj_roo
 
                 result = await execute_tool(tool_name, tool_args)
 
+                if is_cancelled(req_id):
+                    yield f"data: {json.dumps({'type': 'cancelled'})}\n\n"
+                    finish_request(req_id)
+                    return
+
                 yield f"data: {json.dumps({'type': 'tool_result', 'tool': tool_name, 'result': result[:1000]})}\n\n"
 
                 all_tool_calls.append({"tool": tool_name, "args": tool_args})
@@ -850,10 +977,35 @@ When asked about the project structure, use {"ssh to run ls/find in " + proj_roo
 
                 # Feed result back into conversation
                 messages.append({"role": "assistant", "content": content})
-                messages.append({
-                    "role": "user",
-                    "content": f"Tool result for {tool_name}:\n{result}\n\nContinue working toward the user's goal. If you need more information, use another tool. Only give your final answer when you have enough real data to answer properly — do not summarize or describe things you haven't actually read."
-                })
+
+                # After 2+ tool calls, force the model to answer rather than loop
+                if iteration >= 2:
+                    messages.append({
+                        "role": "user",
+                        "content": f"Tool result for {tool_name}:\n{result[:2000]}{'...(truncated)' if len(result) > 2000 else ''}\n\nYou have enough information. Give your final answer now in plain text. Do not use any more tools."
+                    })
+                    # Force final answer by calling without tool descriptions in a fresh way
+                    force_messages = [m for m in messages if m.get("role") != "system"]
+                    force_messages.insert(0, {"role": "system", "content": "You are a helpful assistant. Answer the user's question directly and concisely based on the information gathered. Do not output JSON. Do not use tools. Just answer."})
+                    try:
+                        forced = await chat_ollama(force_messages, model, cancel_event=cancel_event)
+                        if not forced.get("cancelled"):
+                            final_response = forced.get("message", {}).get("content", "").strip()
+                            if final_response:
+                                yield f"data: {json.dumps({'type': 'response', 'content': final_response})}\n\n"
+                                break
+                    except Exception:
+                        pass
+                    # Fall through to normal loop if forced answer failed
+                    messages.append({
+                        "role": "user",
+                        "content": f"Tool result for {tool_name}:\n{result[:2000]}{'...(truncated)' if len(result) > 2000 else ''}\n\nAnswer now."
+                    })
+                else:
+                    messages.append({
+                        "role": "user",
+                        "content": f"Tool result for {tool_name}:\n{result[:2000]}{'...(truncated)' if len(result) > 2000 else ''}\n\nContinue working. Use another tool if needed, otherwise give your final answer in plain text."
+                    })
             else:
                 # No tool call — this is the final response
                 final_response = content
@@ -861,16 +1013,18 @@ When asked about the project structure, use {"ssh to run ls/find in " + proj_roo
                 break
 
         if not final_response and all_tool_results:
-            # Hit iteration limit — ask for summary
+            # Hit iteration limit — force a summary with what we have
             messages.append({
                 "role": "user",
-                "content": "Please summarize what you found and give your final answer."
+                "content": "You have reached the maximum number of tool calls. Based ONLY on what you have already gathered, give your final answer now. Do not use any more tools."
             })
             try:
-                response = await chat_ollama(messages, model)
-                final_response = response.get("message", {}).get("content", "Max iterations reached.")
+                response = await chat_ollama(messages, model, cancel_event=cancel_event)
+                final_response = response.get("message", {}).get("content", "")
+                if not final_response:
+                    final_response = f"Reached tool call limit ({max_iterations} steps). Here is what I found:\n" + "\n".join(f"- {r[:200]}" for r in all_tool_results[:3])
             except Exception:
-                final_response = "Max iterations reached."
+                final_response = f"Reached tool call limit. Partial results from {len(all_tool_results)} tool calls."
             yield f"data: {json.dumps({'type': 'response', 'content': final_response})}\n\n"
 
         # Save to DB
@@ -887,9 +1041,16 @@ When asked about the project structure, use {"ssh to run ls/find in " + proj_roo
                          (datetime.now().isoformat(), req.session_id))
 
         elapsed = time.time() - start_time
+        finish_request(req_id)
         yield f"data: {json.dumps({'type': 'done', 'total_tokens': total_tokens, 'elapsed': round(elapsed, 1), 'iterations': iteration})}\n\n"
 
-    return StreamingResponse(run_agent(), media_type="text/event-stream")
+    # Send request_id to client so it can cancel
+    async def run_with_id():
+        yield f"data: {json.dumps({'type': 'request_id', 'id': req_id})}\n\n"
+        async for chunk in run_agent():
+            yield chunk
+
+    return StreamingResponse(run_with_id(), media_type="text/event-stream")
 
 # ---------------------------------------------------------------------------
 # Routes - Memory
@@ -1111,6 +1272,62 @@ async def scan_project(name: str):
         "key_contents": key_contents
     }
 
+
+@app.get("/api/browse")
+async def browse_directory(path: str = "", remote: str = ""):
+    """Browse a directory, optionally on a remote machine."""
+    if not path:
+        path = str(Path.home()) if not remote else "/home"
+    try:
+        if remote:
+            r = get_remote(remote)
+            if not r:
+                raise HTTPException(status_code=404, detail=f"Remote {remote} not found")
+            result = tool_ssh(remote, f"ls -la {path} 2>/dev/null")
+            if result.startswith("[error]"):
+                raise HTTPException(status_code=400, detail=result)
+            # Parse ls -la output
+            entries = []
+            for line in result.strip().splitlines():
+                parts = line.split(None, 8)
+                if len(parts) < 9:
+                    continue
+                perms, _, _, _, _, _, _, _, name = parts
+                if name in (".", ".."):
+                    continue
+                is_dir = perms.startswith("d")
+                entries.append({
+                    "name": name,
+                    "is_dir": is_dir,
+                    "path": f"{path.rstrip('/')}/{name}"
+                })
+            # Sort: dirs first, then files
+            entries.sort(key=lambda x: (not x["is_dir"], x["name"].lower()))
+            parent = str(Path(path).parent) if path != "/" else None
+            return {"path": path, "entries": entries, "parent": parent, "remote": remote}
+        else:
+            p = Path(path).expanduser().resolve()
+            if not p.exists() or not p.is_dir():
+                raise HTTPException(status_code=400, detail=f"Not a directory: {path}")
+            entries = []
+            try:
+                for item in sorted(p.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
+                    if item.name.startswith("."):
+                        continue
+                    entries.append({
+                        "name": item.name,
+                        "is_dir": item.is_dir(),
+                        "path": str(item)
+                    })
+            except PermissionError:
+                pass
+            parent = str(p.parent) if str(p) != "/" else None
+            return {"path": str(p), "entries": entries, "parent": parent, "remote": ""}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/projects/{name}/file")
 async def read_project_file_route(name: str, request: Request):
     data = await request.json()
@@ -1119,6 +1336,16 @@ async def read_project_file_route(name: str, request: Request):
         raise HTTPException(status_code=404, detail="Project not found")
     content = read_project_file(p, data.get("path", ""))
     return {"content": content}
+
+
+# ---------------------------------------------------------------------------
+# Routes - Cancel
+# ---------------------------------------------------------------------------
+
+@app.post("/api/cancel/{request_id}")
+async def cancel_agent(request_id: str):
+    cancel_request(request_id)
+    return {"ok": True, "cancelled": request_id}
 
 # ---------------------------------------------------------------------------
 # Serve frontend

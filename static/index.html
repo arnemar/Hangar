@@ -236,6 +236,48 @@
   .remote-card-host { font-size: 11px; color: var(--text2); }
   .setup-nav { display: flex; justify-content: space-between; align-items: center; margin-top: 16px; }
   .scanning-indicator { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text2); font-family: var(--font-mono); }
+
+  /* File browser */
+  .file-browser { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .file-browser-bar { padding: 6px 10px; background: var(--bg4); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 11px; color: var(--text2); }
+  .file-browser-path { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file-browser-up { cursor: pointer; color: var(--text3); padding: 2px 6px; border-radius: 3px; font-size: 12px; }
+  .file-browser-up:hover { color: var(--accent); background: var(--bg3); }
+  .file-browser-list { max-height: 240px; overflow-y: auto; }
+  .file-browser-loading { padding: 20px; text-align: center; color: var(--text3); font-size: 12px; }
+  .file-entry { padding: 7px 12px; display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12px; border-bottom: 1px solid var(--border); transition: background 0.1s; }
+  .file-entry:last-child { border-bottom: none; }
+  .file-entry:hover { background: var(--bg3); }
+  .file-entry.selected { background: rgba(0,212,170,0.08); }
+  .file-entry-icon { font-size: 13px; flex-shrink: 0; }
+  .file-entry-name { flex: 1; color: var(--text); }
+  .file-entry-select { font-size: 10px; color: var(--accent); opacity: 0; font-family: var(--font-mono); }
+  .file-entry:hover .file-entry-select { opacity: 1; }
+  .selected-path-display { margin-top: 10px; padding: 8px 12px; background: rgba(0,212,170,0.08); border: 1px solid rgba(0,212,170,0.2); border-radius: var(--radius); font-family: var(--font-mono); font-size: 11px; color: var(--accent); display: flex; align-items: center; gap: 8px; }
+
+  /* File browser */
+  .file-browser { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .browser-toolbar { padding: 6px 10px; background: var(--bg4); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 6px; }
+  .browser-breadcrumb { flex: 1; display: flex; align-items: center; gap: 2px; flex-wrap: wrap; font-size: 11px; font-family: var(--font-mono); min-width: 0; }
+  .breadcrumb-part { color: var(--text2); cursor: pointer; padding: 1px 3px; border-radius: 3px; white-space: nowrap; }
+  .breadcrumb-part:hover { color: var(--accent); background: rgba(0,212,170,0.1); }
+  .breadcrumb-sep { color: var(--text3); }
+  .browser-up { background: none; border: 1px solid var(--border); border-radius: 4px; color: var(--text2); cursor: pointer; padding: 3px 8px; font-size: 11px; flex-shrink: 0; }
+  .browser-up:hover { border-color: var(--accent); color: var(--accent); }
+  .browser-up:disabled { opacity: 0.3; cursor: not-allowed; }
+  .browser-list { max-height: 280px; overflow-y: auto; }
+  .browser-entry { padding: 7px 12px; display: flex; align-items: center; gap: 8px; cursor: pointer; border-bottom: 0.5px solid var(--border); transition: background 0.1s; }
+  .browser-entry:last-child { border-bottom: none; }
+  .browser-entry:hover { background: var(--bg3); }
+  .browser-entry.selected { background: rgba(0,212,170,0.08); }
+  .browser-entry-icon { font-size: 14px; flex-shrink: 0; }
+  .browser-entry-name { font-size: 12px; font-family: var(--font-mono); flex: 1; }
+  .browser-entry-name.dir { color: var(--text); font-weight: 500; }
+  .browser-entry-name.file { color: var(--text2); }
+  .browser-select-btn { font-size: 10px; padding: 2px 8px; background: var(--accent); border: none; border-radius: 3px; color: #000; font-weight: 600; cursor: pointer; flex-shrink: 0; }
+  .browser-select-btn:hover { background: var(--accent2); }
+  .browser-loading { padding: 20px; text-align: center; color: var(--text3); font-size: 12px; font-family: var(--font-mono); }
+  .browser-selected-path { padding: 8px 10px; background: rgba(0,212,170,0.05); border: 1px solid rgba(0,212,170,0.3); border-radius: var(--radius); font-size: 11px; font-family: var(--font-mono); color: var(--accent); margin-top: 8px; word-break: break-all; }
 </style>
 </head>
 <body>
@@ -321,12 +363,20 @@ function Message({ msg }) {
   return null;
 }
 
-function ChatView({ session, model }) {
+function ChatView({ session, model, onRunning, stopRef, draftInput, setDraftInput }) {
   const [messages, setMessages] = useState([]);
-  const [input, setInput] = useState('');
+  const input = draftInput !== undefined ? draftInput : '';
+  const setInput = setDraftInput || (() => {});
   const [loading, setLoading] = useState(false);
   const [stats, setStats] = useState(null);
   const abortRef = useRef(null);
+  const requestIdRef = useRef(null);
+  const loadingRef = useRef(false);
+
+  // Wire stop function to parent ref
+  useEffect(() => {
+    if (stopRef) stopRef.current = stop;
+  });
   const bottomRef = useRef(null);
   const textareaRef = useRef(null);
 
@@ -342,6 +392,12 @@ function ChatView({ session, model }) {
   }, [messages]);
 
   const stop = () => {
+    // Server-side cancel first
+    if (requestIdRef.current) {
+      fetch(`${API}/api/cancel/${requestIdRef.current}`, { method: 'POST' }).catch(() => {});
+      requestIdRef.current = null;
+    }
+    // Client-side abort
     if (abortRef.current) {
       abortRef.current.abort();
       abortRef.current = null;
@@ -354,7 +410,8 @@ function ChatView({ session, model }) {
     if (!input.trim() || loading || !session) return;
     const text = input.trim();
     setInput('');
-    setLoading(true);
+    if (setDraftInput) setDraftInput('');
+    setLoading(true); loadingRef.current = true; onRunning && onRunning(true);
 
     const userMsg = { id: Date.now(), role: 'user', content: text, created_at: new Date().toISOString() };
     setMessages(prev => [...prev, userMsg]);
@@ -422,7 +479,12 @@ function ChatView({ session, model }) {
                   const filtered = prev.filter(m => m.role !== 'thinking');
                   return [...filtered, { id: assistantId, role: 'assistant', content: data.content, created_at: new Date().toISOString() }];
                 });
+              } else if (data.type === 'request_id') {
+                requestIdRef.current = data.id;
+              } else if (data.type === 'cancelled') {
+                setMessages(prev => prev.filter(m => m.role !== 'thinking'));
               } else if (data.type === 'done') {
+                requestIdRef.current = null;
                 setMessages(prev => prev.filter(m => m.role !== 'thinking'));
                 if (data.total_tokens) {
                   setStats({ tps: (data.total_tokens / data.elapsed).toFixed(1), ctx: data.total_tokens, tokens: data.total_tokens, elapsed: data.elapsed, iterations: data.iterations, mode: 'agent' });
@@ -434,7 +496,9 @@ function ChatView({ session, model }) {
       } else {
         // Chat mode: streaming chunks
         let fullContent = '';
-        setMessages(prev => [...prev, { id: assistantId, role: 'assistant', content: '', created_at: new Date().toISOString() }]);
+        // Show thinking indicator while waiting for first chunk
+        setMessages(prev => [...prev, { id: 'thinking-chat', role: 'thinking' }]);
+        let firstChunk = true;
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
@@ -447,11 +511,22 @@ function ChatView({ session, model }) {
               const data = JSON.parse(line.slice(6));
               if (data.type === 'chunk') {
                 fullContent += data.content;
-                setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: fullContent } : m));
-              } else if (data.type === 'done' && data.eval_count) {
-                const tps = data.eval_duration > 0 ? (data.eval_count / (data.eval_duration / 1e9)).toFixed(1) : '?';
-                const ctx = (data.prompt_eval_count || 0) + (data.eval_count || 0);
-                setStats({ tps, ctx, tokens: data.eval_count, mode: 'chat' });
+                if (firstChunk) {
+                  firstChunk = false;
+                  setMessages(prev => {
+                    const filtered = prev.filter(m => m.id !== 'thinking-chat');
+                    return [...filtered, { id: assistantId, role: 'assistant', content: fullContent, created_at: new Date().toISOString() }];
+                  });
+                } else {
+                  setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: fullContent } : m));
+                }
+              } else if (data.type === 'done') {
+                setMessages(prev => prev.filter(m => m.id !== 'thinking-chat'));
+                if (data.eval_count) {
+                  const tps = data.eval_duration > 0 ? (data.eval_count / (data.eval_duration / 1e9)).toFixed(1) : '?';
+                  const ctx = (data.prompt_eval_count || 0) + (data.eval_count || 0);
+                  setStats({ tps, ctx, tokens: data.eval_count, mode: 'chat' });
+                }
               }
             } catch {}
           }
@@ -460,7 +535,7 @@ function ChatView({ session, model }) {
     } catch (e) {
       setMessages(prev => [...prev, { id: Date.now(), role: 'assistant', content: `Error: ${e.message}`, created_at: new Date().toISOString() }]);
     }
-    setLoading(false);
+    setLoading(false); loadingRef.current = false; onRunning && onRunning(false);
   };
 
   const onKeyDown = (e) => {
@@ -522,7 +597,7 @@ function ChatView({ session, model }) {
             />
           </div>
           {loading ? (
-            <button className="stop-btn" onClick={stop}>■ Stop</button>
+            <button className="stop-btn" onClick={stop} style={{minWidth:80}}>■ Stop</button>
           ) : (
             <button className="send-btn" onClick={send} disabled={!input.trim()}>Send</button>
           )}
@@ -591,6 +666,88 @@ function MemoryView() {
 }
 
 
+
+
+
+
+
+function FileBrowser({ remote, onSelect, selectedPath }) {
+  const [currentPath, setCurrentPath] = useState('');
+  const [entries, setEntries] = useState([]);
+  const [parent, setParent] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const browse = async (path) => {
+    setLoading(true);
+    setError('');
+    try {
+      const params = new URLSearchParams({ path: path || '' });
+      if (remote) params.append('remote', remote);
+      const r = await fetch(`/api/browse?${params}`);
+      if (!r.ok) {
+        const e = await r.json();
+        setError(e.detail || 'Browse failed');
+        setLoading(false);
+        return;
+      }
+      const data = await r.json();
+      setCurrentPath(data.path);
+      setEntries(data.entries || []);
+      setParent(data.parent);
+    } catch(e) {
+      setError(e.message);
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => { browse(''); }, [remote]);
+
+  const breadcrumbs = () => {
+    if (!currentPath) return [];
+    const parts = currentPath.split('/').filter(Boolean);
+    return parts.map((p, i) => ({
+      label: p || '/',
+      path: '/' + parts.slice(0, i + 1).join('/')
+    }));
+  };
+
+  return (
+    <div className="file-browser">
+      <div className="browser-toolbar">
+        <button className="browser-up" onClick={() => parent && browse(parent)} disabled={!parent}>↑</button>
+        <div className="browser-breadcrumb">
+          <span className="breadcrumb-part" onClick={() => browse('/')}>/</span>
+          {breadcrumbs().map((b, i) => (
+            <React.Fragment key={b.path}>
+              <span className="breadcrumb-sep">/</span>
+              <span className="breadcrumb-part" onClick={() => browse(b.path)}>{b.label}</span>
+            </React.Fragment>
+          ))}
+        </div>
+        {currentPath && (
+          <button className="browser-select-btn" onClick={() => onSelect(currentPath)}>
+            Use this folder ✓
+          </button>
+        )}
+      </div>
+      <div className="browser-list">
+        {loading && <div className="browser-loading">loading...</div>}
+        {error && <div className="browser-loading" style={{color:'var(--red)'}}>{error}</div>}
+        {!loading && !error && entries.length === 0 && <div className="browser-loading">(empty)</div>}
+        {!loading && entries.map(e => (
+          <div key={e.path} className={`browser-entry ${selectedPath === e.path ? 'selected' : ''}`}
+            onClick={() => { if (e.is_dir) browse(e.path); }}>
+            <span className="browser-entry-icon">{e.is_dir ? '📁' : '📄'}</span>
+            <span className={`browser-entry-name ${e.is_dir ? 'dir' : 'file'}`}>{e.name}</span>
+            {e.is_dir && <span style={{fontSize:10,color:'var(--text3)',marginLeft:'auto'}}>click to open</span>}
+
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function ProjectSetupModal({ onClose, onCreated }) {
   const [step, setStep] = useState(1); // 1=type, 2=remote(if ssh), 3=path+name, 4=scanning
@@ -700,24 +857,26 @@ function ProjectSetupModal({ onClose, onCreated }) {
 
           {step === 3 && (
             <div className="setup-step">
-              <div className="setup-title">Project details</div>
-              <div className="setup-sub">
-                {type === 'remote' ? `Path on ${selectedRemote?.name}` : 'Path on this machine'}
+              <div className="setup-title">
+                {type === 'remote' ? `Browse ${selectedRemote?.name}` : 'Browse this machine'}
               </div>
-              <div style={{display:'flex',flexDirection:'column',gap:10}}>
-                <div>
-                  <div className="form-label" style={{marginBottom:6}}>Project path</div>
-                  <input className="settings-input" value={path} onChange={e => setPath(e.target.value)} placeholder={type === 'remote' ? '/home/arne/myproject' : '/home/arne/myproject'} autoFocus />
+              <div className="setup-sub">Navigate to your project folder and click "select" to choose it.</div>
+              <FileBrowser
+                remote={type === 'remote' ? selectedRemote?.name : null}
+                onSelect={p => { setPath(p); setName(p.split('/').pop()); }}
+                selectedPath={path}
+              />
+              {path && (
+                <div style={{marginTop:10,padding:'12px',background:'var(--bg4)',border:'1px solid rgba(0,212,170,0.3)',borderRadius:'var(--radius)',display:'flex',flexDirection:'column',gap:8}}>
+                  <div style={{fontSize:11,fontFamily:'var(--font-mono)',color:'var(--accent)',wordBreak:'break-all'}}>📁 {path}</div>
+                  <input className="settings-input" value={name} onChange={e => setName(e.target.value)} placeholder={path.split('/').pop() || 'project name'} />
+                  <input className="settings-input" value={description} onChange={e => setDescription(e.target.value)} placeholder="Description (optional)" />
+                  <div style={{display:'flex',gap:8}}>
+                    <button className="settings-btn" onClick={() => setPath('')}>← Change folder</button>
+                    <button className="settings-btn primary" onClick={create}>Create project →</button>
+                  </div>
                 </div>
-                <div>
-                  <div className="form-label" style={{marginBottom:6}}>Project name (optional)</div>
-                  <input className="settings-input" value={name} onChange={e => setName(e.target.value)} placeholder={path.split('/').pop() || 'my-project'} />
-                </div>
-                <div>
-                  <div className="form-label" style={{marginBottom:6}}>Description (optional)</div>
-                  <input className="settings-input" value={description} onChange={e => setDescription(e.target.value)} placeholder="What is this project?" />
-                </div>
-              </div>
+              )}
             </div>
           )}
 
@@ -735,14 +894,19 @@ function ProjectSetupModal({ onClose, onCreated }) {
             </div>
           )}
 
-          {step < 4 && (
+          {step < 4 && step !== 3 && (
             <div className="setup-nav" style={{padding:'0 20px 20px'}}>
               <button className="settings-btn" onClick={() => step > 1 ? setStep(step - 1) : onClose()}>
                 {step === 1 ? 'Cancel' : '← Back'}
               </button>
               <button className="settings-btn primary" onClick={goNext} disabled={!canProceed()}>
-                {step === 3 ? 'Create project' : 'Next →'}
+                Next →
               </button>
+            </div>
+          )}
+          {step === 3 && !path && (
+            <div className="setup-nav" style={{padding:'0 20px 20px'}}>
+              <button className="settings-btn" onClick={() => setStep(step - 1)}>← Back</button>
             </div>
           )}
         </div>
@@ -942,6 +1106,9 @@ function App() {
   const [mode, setMode] = useState('chat');
   const [view, setView] = useState('chat'); // 'chat' | 'memory'
   const [showSettings, setShowSettings] = useState(false);
+  const [isRunning, setIsRunning] = useState(false);
+  const globalStopRef = useRef(null);
+  const [draftInput, setDraftInput] = useState('');
   const [projects, setProjects] = useState([]);
   const [activeProject, setActiveProject] = useState(null);
   const [projectsOpen, setProjectsOpen] = useState(true);
@@ -1081,7 +1248,7 @@ function App() {
         {view === 'memory' ? (
           <MemoryView />
         ) : (
-          <ChatView session={currentSession} model={selectedModel} />
+          <ChatView session={currentSession} model={selectedModel} onRunning={setIsRunning} stopRef={globalStopRef} draftInput={draftInput} setDraftInput={setDraftInput} />
         )}
       </div>
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
