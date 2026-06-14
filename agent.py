@@ -1,20 +1,23 @@
-"""Agent loop: cancellation, parsing, context management, streaming execution.
+"""Agent loop: streaming, planning, cancellation, context management.
 
-Reliability improvements
-------------------------
+Key behaviours
+--------------
+- Streaming: every token from the model is forwarded live as agent_stream
+  events.  Tool-call JSON is cleared from the UI when the tool_call event
+  arrives; final-answer text stays as the response.
+- Planning: if the model starts its first response with "Plan:", the line is
+  extracted and sent as a separate 'plan' event so the user sees the model's
+  intent before it starts using tools.
+- No premature forced answer: the old "force final at iteration 2" logic is
+  removed.  The model can use all available iterations freely; we only force
+  a final answer when the very last iteration is exhausted.
+- Higher default iteration cap (12) so multi-step coding tasks complete.
 - Retry on malformed tool call: if parse fails but the model clearly tried to
   output a JSON tool call, send a format-correction message and retry once.
-- Better final-answer detection: don't treat a mangled tool-call attempt as a
-  final answer without first attempting a correction.
-- Context compression: when token usage exceeds 70 % of num_ctx, the middle of
-  the conversation is summarised so the agent doesn't run out of context on
-  long tasks.
-- Smart truncation: long tool results are kept as head + tail rather than
-  blindly cut at N chars, so critical output at the end isn't lost.
-- Tool budget: the model is told upfront how many tool calls it has so it
-  doesn't waste them on redundant steps.
-- Model-specific hints: deepseek / llama / mistral / qwen each get a short
-  formatting reminder that matches their tendencies.
+- Context compression: when token usage exceeds 70 % of num_ctx, the middle
+  of the conversation is summarised to keep the context window free.
+- Smart truncation: long tool results keep head + tail so nothing critical is
+  lost at the end.
 """
 
 import json
@@ -29,7 +32,7 @@ from typing import AsyncGenerator, Optional
 from config import IS_WINDOWS, OS_NAME, shell_name
 from db import get_db
 from mcp_client import mcp_manager
-from ollama_client import chat_ollama
+from ollama_client import chat_ollama, stream_ollama
 from storage import get_project, load_memory, load_settings
 from tools import TOOLS, execute_tool
 
@@ -125,7 +128,6 @@ def parse_tool_call(text: str) -> Optional[dict]:
 
 
 def _looks_like_tool_attempt(text: str) -> bool:
-    """Return True if the model clearly tried to write a tool call but formatted it wrong."""
     s = text.strip()
     has_braces = '{' in s and '}' in s
     has_tool_key = '"tool"' in s or "'tool'" in s
@@ -137,7 +139,6 @@ def _looks_like_tool_attempt(text: str) -> bool:
 # ── Smart truncation ──────────────────────────────────────────────────────────
 
 def _smart_truncate(text: str, max_chars: int = 2000) -> str:
-    """Keep the head and tail of long output so nothing critical is lost."""
     if len(text) <= max_chars:
         return text
     head = max_chars // 2
@@ -154,11 +155,6 @@ async def _compress_context(
     ollama_url: str,
     num_ctx: int,
 ) -> list:
-    """Summarise the middle of the conversation to free up context space.
-
-    Keeps: system message, summary block, last 4 messages.
-    Skips if there aren't enough messages to make it worthwhile.
-    """
     if len(messages) < 9:
         return messages
 
@@ -197,9 +193,9 @@ async def _compress_context(
                 system,
                 {
                     "role": "user",
-                    "content": f"[Summary of earlier steps in this conversation]\n{summary}",
+                    "content": f"[Summary of earlier steps]\n{summary}",
                 },
-                {"role": "assistant", "content": "Understood, I have the earlier context."},
+                {"role": "assistant", "content": "Understood, continuing from where we left off."},
                 *recent,
             ]
     except Exception:
@@ -212,18 +208,25 @@ async def _compress_context(
 
 def _model_hints(model: str) -> str:
     name = model.lower()
+    base = (
+        "\nPLANNING: On your FIRST response only, you may start with "
+        '"Plan: [one sentence]" before the JSON tool call. '
+        "This helps you stay on track."
+    )
     if "deepseek" in name:
         return (
-            "\nFORMAT RULE: When using a tool, output the JSON object with NO text before "
-            "or after it. The response must start with { and end with }. "
-            "Never wrap it in markdown. Never add an explanation before the JSON."
+            base +
+            "\nFORMAT RULE: When using a tool, output ONLY the JSON object — "
+            "nothing before or after it (except the optional Plan: prefix on iteration 1). "
+            "No markdown, no explanation."
         )
     if any(x in name for x in ("llama", "mistral", "qwen", "gemma", "phi")):
         return (
-            "\nFORMAT RULE: Tool calls must be a bare JSON object only. "
-            "Final answers must be plain text only — no JSON."
+            base +
+            "\nFORMAT RULE: Tool calls must be a bare JSON object. "
+            "Final answers must be plain text — no JSON."
         )
-    return ""
+    return base
 
 
 # ── System prompt ─────────────────────────────────────────────────────────────
@@ -260,34 +263,33 @@ def _build_system_prompt(
             "Use standard bash/sh syntax."
         )
 
-    prompt = f"""You are an AI agent. You MUST use tools to accomplish tasks — never describe what you would do, just do it.
+    prompt = f"""You are an AI coding agent. Use tools to accomplish tasks — never describe what you would do, just do it.
 
 CRITICAL RULES:
 - CREATE a file → call write_file immediately.
 - RUN a command → call shell immediately.
 - READ a file → call read_file immediately.
 - FIND something → call shell or list_dir immediately.
-- Never say "I will …" — just use the tool. Action first, explanation after.
+- Never say "I will …" — just use the tool.
+- You have up to {max_iter} tool calls. Use as many as the task requires — do not give up early.
+- For multi-step tasks: read first, then act, then verify.
 
 {shell_guidance}
-Home directory: {home}
-Tool call budget: {max_iter} tool calls per message. Use them efficiently.{_model_hints(model)}
+Home directory: {home}{_model_hints(model)}
 
 Available tools:
 {chr(10).join(tool_lines)}
 
-When you need to use a tool, output ONLY this JSON (nothing else before or after):
+To use a tool, output ONLY this JSON (with optional Plan: prefix on first response):
 {{"tool": "tool_name", "args": {{"param": "value"}}}}
 
-When you have enough information, respond in plain text WITHOUT any JSON.
+When done, respond in plain text without any JSON.
 
 Rules:
 - Use tools only when the task requires real data — never fabricate output.
-- After tool results, either call another tool or give your final answer.
-- Keep final answers concise.
+- Keep final answers concise but complete.
 - Never wrap your final answer in JSON.
-- Avoid slow commands (find / without -maxdepth); always add limits.
-- When asked to describe a project: list the directory first, then read key files."""
+- Avoid slow commands; always add limits (head, -maxdepth, etc.)."""
 
     if project:
         from projects import read_project_file, scan_project_structure
@@ -314,18 +316,16 @@ Rules:
 Active project: {project.get("name")}
 Location: {loc}
 {ssh_note}
-Stay within {proj_root} unless explicitly asked to go elsewhere.
+Stay within {proj_root} unless explicitly asked otherwise.
 Always read current file content before editing.
 
 Project structure:
 {structure[:800]}
 
-{("README:\n" + readme) if readme else ""}
-
-Use the above context before making tool calls; only call tools for specifics."""
+{("README:\n" + readme) if readme else ""}"""
 
     if user_name:
-        prompt += f"\n\nThe user's name is {user_name}."
+        prompt += f"\n\nUser: {user_name}."
     if memory["facts"]:
         facts = "\n".join(f"- {f['content']}" for f in memory["facts"])
         prompt += f"\n\nUser context:\n{facts}"
@@ -347,7 +347,7 @@ async def run_agent_stream(
 ) -> AsyncGenerator[str, None]:
     cancel_ev = register_request(request_id)
     memory = load_memory()
-    max_iter = settings.get("agent_max_iterations", 5)
+    max_iter = settings.get("agent_max_iterations", 12)
     num_ctx = settings.get("context_length", 8192)
     ollama_url = settings.get("ollama_url", "")
 
@@ -387,22 +387,39 @@ async def run_agent_stream(
 
         yield f"data: {json.dumps({'type': 'thinking', 'iteration': iteration})}\n\n"
 
+        # ── Stream the model response token-by-token ──────────────────────────
+        raw = ""
+        iter_tokens = 0
+
         try:
-            resp = await chat_ollama(
-                messages, model,
-                cancel_event=cancel_ev, num_ctx=num_ctx, ollama_url=ollama_url,
-            )
-        except Exception as e:
-            yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
+            async for line in stream_ollama(messages, model, num_ctx=num_ctx, ollama_url=ollama_url):
+                if cancel_ev.is_set():
+                    yield f"data: {json.dumps({'type': 'cancelled'})}\n\n"
+                    finish_request(request_id)
+                    return
+                try:
+                    data = json.loads(line)
+                except Exception:
+                    continue
+                chunk = data.get("message", {}).get("content", "")
+                if chunk:
+                    raw += chunk
+                    yield f"data: {json.dumps({'type': 'agent_stream', 'content': chunk})}\n\n"
+                if data.get("done"):
+                    iter_tokens = (
+                        data.get("eval_count", 0) + data.get("prompt_eval_count", 0)
+                    )
+                    break
+        except Exception as exc:
+            yield f"data: {json.dumps({'type': 'error', 'content': str(exc)})}\n\n"
             return
 
-        if resp.get("cancelled"):
+        total_tokens += iter_tokens
+
+        if is_cancelled(request_id):
             yield f"data: {json.dumps({'type': 'cancelled'})}\n\n"
             finish_request(request_id)
             return
-
-        raw = resp.get("message", {}).get("content", "").strip()
-        total_tokens += resp.get("eval_count", 0) + resp.get("prompt_eval_count", 0)
 
         if not raw:
             yield f"data: {json.dumps({'type': 'error', 'content': 'Empty response from model'})}\n\n"
@@ -411,6 +428,22 @@ async def run_agent_stream(
         content = _strip_ds(raw)
         if not content:
             break
+
+        # ── Extract optional plan from first response ─────────────────────────
+        if iteration == 1 and content.lstrip().startswith("Plan:"):
+            content = content.lstrip()
+            newline = content.find("\n")
+            if newline > 0:
+                plan_text = content[5:newline].strip()
+                content = content[newline:].strip()
+            else:
+                plan_text = content[5:].strip()
+                content = ""
+            if plan_text:
+                yield f"data: {json.dumps({'type': 'plan', 'content': plan_text})}\n\n"
+
+        if not content:
+            continue
 
         tc = parse_tool_call(content)
 
@@ -422,7 +455,7 @@ async def run_agent_stream(
                 "role": "user",
                 "content": (
                     "Your response was not valid JSON. Output ONLY the JSON object, "
-                    "nothing else — no explanation, no markdown:\n"
+                    "nothing else:\n"
                     '{"tool": "tool_name", "args": {"param": "value"}}'
                 ),
             })
@@ -437,14 +470,11 @@ async def run_agent_stream(
                     ).strip()
                     retry_tc = parse_tool_call(retry_content)
                     if retry_tc:
-                        # Retry succeeded — use the corrected call
                         tc = retry_tc
                         content = retry_content
-                        # Remove the correction exchange from messages
                         messages.pop()
                         messages.pop()
                     else:
-                        # Retry failed too — remove correction exchange, treat as final answer
                         messages.pop()
                         messages.pop()
             except Exception:
@@ -455,6 +485,7 @@ async def run_agent_stream(
             tool_args = tc.get("args", {})
 
             yield f"data: {json.dumps({'type': 'tool_call', 'tool': tool_name, 'args': tool_args})}\n\n"
+
             if tool_name.startswith("mcp__"):
                 result = await mcp_manager.call_tool(tool_name, tool_args)
             else:
@@ -465,7 +496,6 @@ async def run_agent_stream(
                 finish_request(request_id)
                 return
 
-            # Smart truncate: head + tail so tail output isn't lost
             truncated = _smart_truncate(result, max_chars=2000)
             yield f"data: {json.dumps({'type': 'tool_result', 'tool': tool_name, 'result': _smart_truncate(result, 1000)})}\n\n"
 
@@ -475,8 +505,8 @@ async def run_agent_stream(
             messages.append({"role": "assistant", "content": content})
             remaining = max_iter - iteration
 
-            if iteration >= 2:
-                # Force a final answer after 2+ tool calls
+            if remaining == 0:
+                # Last iteration: force a final answer from accumulated results
                 force_msgs = [m for m in messages if m["role"] != "system"]
                 force_msgs.insert(0, {
                     "role": "system",
@@ -489,8 +519,8 @@ async def run_agent_stream(
                     "role": "user",
                     "content": (
                         f"Tool result for {tool_name}:\n{truncated}\n\n"
-                        f"You have {remaining} tool call(s) remaining. "
-                        "If you have enough information, give your final answer now in plain text."
+                        "You have used all available tool calls. "
+                        "Give your complete final answer now in plain text."
                     ),
                 })
                 try:
@@ -506,14 +536,6 @@ async def run_agent_stream(
                             break
                 except Exception:
                     pass
-                # Forced answer failed or looked like another tool call — let loop continue
-                messages.append({
-                    "role": "user",
-                    "content": (
-                        f"Tool result for {tool_name}:\n{truncated}\n\n"
-                        f"You have {remaining} tool call(s) remaining. Answer now."
-                    ),
-                })
             else:
                 messages.append({
                     "role": "user",
@@ -524,12 +546,12 @@ async def run_agent_stream(
                     ),
                 })
         else:
-            # No tool call — this is the final answer
+            # No tool call → this is the final answer
             final_response = content
             yield f"data: {json.dumps({'type': 'response', 'content': final_response})}\n\n"
             break
 
-    # ── Hit iteration limit ───────────────────────────────────────────────────
+    # ── Hit iteration limit without a final answer ────────────────────────────
     if not final_response and all_tool_results:
         messages.append({
             "role": "user",

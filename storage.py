@@ -25,7 +25,7 @@ def save_memory(memory: dict) -> None:
 _DEFAULTS: dict = {
     "ollama_url": "http://localhost:11434",
     "default_model": DEFAULT_MODEL,
-    "agent_max_iterations": 5,
+    "agent_max_iterations": 12,
     "agent_timeout": 120,
     "context_length": 8192,
     "remotes": [],
