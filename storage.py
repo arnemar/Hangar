@@ -27,6 +27,7 @@ _DEFAULTS: dict = {
     "default_model": DEFAULT_MODEL,
     "agent_max_iterations": 12,
     "agent_timeout": 120,
+    "planner_model": "",
     "context_length": 8192,
     "remotes": [],
     "mcp_servers": [],

@@ -335,6 +335,53 @@ Project structure:
     return prompt
 
 
+# ── Planner ───────────────────────────────────────────────────────────────────
+
+async def generate_plan(
+    task: str,
+    planner_model: str,
+    ollama_url: str,
+    num_ctx: int,
+) -> Optional[str]:
+    """Call the planner model once to produce a numbered execution plan.
+
+    Designed to be used with a reasoning model (e.g. deepseek-r1:7b) before
+    the main agent loop runs on the coding model.  The planner sees only the
+    task description and returns concise numbered steps — no tool calls, no
+    code, just a plan.
+    """
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are a task planner for an AI coding agent. "
+                "Given a coding task, output a concise numbered plan (3–7 steps). "
+                "Each step must be one concrete action: read a specific file, run a "
+                "command, make a specific edit, or verify something. "
+                "Do NOT write code. Do NOT explain. Output the numbered list only.\n\n"
+                "Example:\n"
+                "1. Read src/app.py to understand the route structure\n"
+                "2. Find the broken handler in routes/users.py\n"
+                "3. Fix the off-by-one error in get_page()\n"
+                "4. Run pytest tests/test_users.py to verify"
+            ),
+        },
+        {"role": "user", "content": f"Task: {task}"},
+    ]
+    try:
+        resp = await chat_ollama(
+            messages, planner_model,
+            num_ctx=min(4096, num_ctx),
+            ollama_url=ollama_url,
+        )
+        plan = resp.get("message", {}).get("content", "").strip()
+        # Strip any <think>...</think> block that reasoning models emit
+        plan = re.sub(r'<think>[\s\S]*?</think>', '', plan, flags=re.IGNORECASE).strip()
+        return plan or None
+    except Exception:
+        return None
+
+
 # ── Agent loop ────────────────────────────────────────────────────────────────
 
 async def run_agent_stream(
@@ -364,7 +411,27 @@ async def run_agent_stream(
     for row in rows:
         if row["role"] in ("user", "assistant"):
             messages.append({"role": row["role"], "content": row["content"]})
-    messages.append({"role": "user", "content": message})
+
+    # ── Optional planner pre-pass ─────────────────────────────────────────────
+    planner_model = settings.get("planner_model", "").strip()
+    plan_text = None
+    if planner_model and planner_model != model:
+        yield f"data: {json.dumps({'type': 'status', 'message': f'planning with {planner_model}…'})}\n\n"
+        plan_text = await generate_plan(message, planner_model, ollama_url, num_ctx)
+        if plan_text:
+            yield f"data: {json.dumps({'type': 'plan', 'content': plan_text, 'model': planner_model})}\n\n"
+
+    # Build user turn — inject plan as context when available
+    if plan_text:
+        messages.append({
+            "role": "user",
+            "content": (
+                f"{message}\n\n"
+                f"Execution plan (follow this order):\n{plan_text}"
+            ),
+        })
+    else:
+        messages.append({"role": "user", "content": message})
 
     all_tool_calls: list[dict] = []
     all_tool_results: list[str] = []

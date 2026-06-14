@@ -330,6 +330,7 @@ if (window.Prism && Prism.plugins && Prism.plugins.autoloader) {
 
   /* Plan message */
   .plan-msg { font-size: 11px; color: var(--text2); font-family: var(--font-mono); padding: 5px 10px; background: rgba(240,165,0,0.06); border: 1px solid rgba(240,165,0,0.15); border-radius: var(--radius); display: inline-flex; align-items: center; gap: 8px; max-width: 80%; }
+  .plan-msg.plan-msg-block { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; max-width: 90%; }
   .plan-label { font-size: 9px; color: var(--yellow); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; flex-shrink: 0; }
 
   /* Streaming bubble */
@@ -580,11 +581,14 @@ function Message({ msg }) {
     );
   }
   if (msg.role === 'plan') {
+    const multiline = msg.content.includes('\n');
     return (
       <div className="message assistant">
-        <div className="plan-msg">
-          <span className="plan-label">plan</span>
-          {msg.content}
+        <div className={`plan-msg${multiline ? ' plan-msg-block' : ''}`}>
+          <span className="plan-label">{msg.model ? `plan · ${msg.model}` : 'plan'}</span>
+          {multiline
+            ? <pre style={{margin:0,fontFamily:'var(--font-mono)',fontSize:11,whiteSpace:'pre-wrap'}}>{msg.content}</pre>
+            : msg.content}
         </div>
       </div>
     );
@@ -1586,12 +1590,20 @@ function SettingsModal({ onClose }) {
               <div className="settings-section">
                 <div className="settings-label">Max iterations</div>
                 <div style={{fontSize:11,color:'var(--text3)',marginBottom:8}}>How many tool calls the agent can make per message</div>
-                <input className="settings-input" type="number" value={settings.agent_max_iterations || 10} onChange={e => setSettings({...settings, agent_max_iterations: parseInt(e.target.value)})} />
+                <input className="settings-input" type="number" value={settings.agent_max_iterations || 12} onChange={e => setSettings({...settings, agent_max_iterations: parseInt(e.target.value)})} />
               </div>
               <div className="settings-section">
                 <div className="settings-label">Timeout (seconds)</div>
                 <div style={{fontSize:11,color:'var(--text3)',marginBottom:8}}>Max time to wait for each model response</div>
                 <input className="settings-input" type="number" value={settings.agent_timeout || 120} onChange={e => setSettings({...settings, agent_timeout: parseInt(e.target.value)})} />
+              </div>
+              <div className="settings-section">
+                <div className="settings-label">Planner model <span style={{color:'var(--text3)',fontWeight:400}}>(optional)</span></div>
+                <div style={{fontSize:11,color:'var(--text3)',marginBottom:8}}>
+                  Reasoning model to plan before the main agent acts. Runs once per task then hands off.
+                  Leave empty to disable. Example: <span style={{fontFamily:'var(--font-mono)',color:'var(--text2)'}}>deepseek-r1:7b</span>
+                </div>
+                <input className="settings-input" placeholder="e.g. deepseek-r1:7b" value={settings.planner_model || ''} onChange={e => setSettings({...settings, planner_model: e.target.value})} />
               </div>
               <div className="settings-section">
                 <button className="settings-btn primary" onClick={saveSettings}>{saved ? '✓ Saved' : 'Save changes'}</button>
