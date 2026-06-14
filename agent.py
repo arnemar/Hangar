@@ -299,13 +299,6 @@ Rules:
         loc = f"{proj_remote}:{proj_root}" if proj_remote else proj_root
         structure = scan_project_structure(project)
 
-        readme = ""
-        for rname in ("README.md", "readme.md", "README.txt"):
-            content = read_project_file(project, rname)
-            if not content.startswith("[error]"):
-                readme = content[:5000]
-                break
-
         ssh_note = (
             f'SSH remote — use ssh tool with remote="{proj_remote}" for file ops'
             if proj_remote
@@ -318,12 +311,10 @@ Location: {loc}
 {ssh_note}
 Stay within {proj_root} unless explicitly asked otherwise.
 Always read current file content before editing.
-For questions about what the project does, read key source files (entry points, main modules, config files) — do not rely solely on the README.
+When asked about the project, read README.md first, then explore key source files (entry points, config files, main modules) — never answer from the file tree alone.
 
 Project structure:
-{structure[:2000]}
-
-{("README:\n" + readme) if readme else ""}"""
+{structure[:2000]}"""
 
     if user_name:
         prompt += f"\n\nUser: {user_name}."
