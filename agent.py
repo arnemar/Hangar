@@ -303,7 +303,7 @@ Rules:
         for rname in ("README.md", "readme.md", "README.txt"):
             content = read_project_file(project, rname)
             if not content.startswith("[error]"):
-                readme = content[:2000]
+                readme = content[:5000]
                 break
 
         ssh_note = (
@@ -318,9 +318,10 @@ Location: {loc}
 {ssh_note}
 Stay within {proj_root} unless explicitly asked otherwise.
 Always read current file content before editing.
+For questions about what the project does, read key source files (entry points, main modules, config files) — do not rely solely on the README.
 
 Project structure:
-{structure[:800]}
+{structure[:2000]}
 
 {("README:\n" + readme) if readme else ""}"""
 
