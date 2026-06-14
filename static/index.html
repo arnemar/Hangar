@@ -7,6 +7,14 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js" data-manual></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
+<script>
+if (window.Prism && Prism.plugins && Prism.plugins.autoloader) {
+  Prism.plugins.autoloader.languages_path = 'https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/';
+}
+</script>
 <style>
   :root {
     --bg: #0d0d0d;
@@ -281,6 +289,51 @@
   .browser-loading { padding: 20px; text-align: center; color: var(--text3); font-size: 12px; font-family: var(--font-mono); }
   .browser-selected-path { padding: 8px 10px; background: rgba(0,212,170,0.05); border: 1px solid rgba(0,212,170,0.3); border-radius: var(--radius); font-size: 11px; font-family: var(--font-mono); color: var(--accent); margin-top: 8px; word-break: break-all; }
 
+  /* Code block header (lang label + copy button) */
+  .code-wrap { position: relative; margin: 8px 0; }
+  .code-wrap pre[class*="language-"] { margin: 0; border-radius: var(--radius); font-size: 12px; border: 1px solid var(--border); }
+  .code-header { display: flex; align-items: center; justify-content: space-between; padding: 4px 10px; background: var(--bg4); border: 1px solid var(--border); border-bottom: none; border-radius: var(--radius) var(--radius) 0 0; }
+  .code-lang-label { font-size: 10px; font-family: var(--font-mono); color: var(--text3); text-transform: uppercase; letter-spacing: 0.06em; }
+  .copy-btn { font-size: 10px; font-family: var(--font-mono); color: var(--text3); background: none; border: 1px solid var(--border); border-radius: 4px; padding: 2px 8px; cursor: pointer; transition: all 0.15s; }
+  .copy-btn:hover { color: var(--accent); border-color: var(--accent); }
+  .copy-btn.copied { color: var(--accent); }
+
+  /* Skill popup (slash commands) */
+  .input-outer { position: relative; }
+  .skill-popup { position: absolute; bottom: calc(100% + 6px); left: 0; right: 0; background: var(--bg2); border: 1px solid var(--border2); border-radius: var(--radius); overflow: hidden; box-shadow: 0 -4px 20px rgba(0,0,0,0.5); z-index: 50; max-height: 260px; overflow-y: auto; }
+  .skill-popup-header { padding: 6px 12px; font-size: 10px; font-family: var(--font-mono); color: var(--text3); border-bottom: 1px solid var(--border); text-transform: uppercase; letter-spacing: 0.06em; }
+  .skill-item { padding: 8px 14px; display: flex; align-items: center; gap: 10px; cursor: pointer; transition: background 0.1s; border-bottom: 1px solid var(--border); }
+  .skill-item:last-child { border-bottom: none; }
+  .skill-item:hover, .skill-item.active { background: var(--bg4); }
+  .skill-icon { font-size: 15px; flex-shrink: 0; }
+  .skill-name { font-family: var(--font-mono); font-size: 12px; color: var(--accent); font-weight: 600; min-width: 80px; }
+  .skill-desc { font-size: 11px; color: var(--text2); }
+
+  /* MCP server items */
+  .mcp-server-item { padding: 10px 12px; background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 6px; }
+  .mcp-server-header { display: flex; align-items: center; justify-content: space-between; }
+  .mcp-server-name { font-family: var(--font-mono); font-size: 12px; font-weight: 600; color: var(--accent); }
+  .mcp-server-cmd { font-size: 10px; color: var(--text3); font-family: var(--font-mono); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px; }
+  .mcp-status { font-size: 10px; font-family: var(--font-mono); padding: 2px 7px; border-radius: 3px; }
+  .mcp-status.connected { background: rgba(0,212,170,0.1); color: var(--accent); border: 1px solid rgba(0,212,170,0.2); }
+  .mcp-status.disconnected { background: rgba(255,77,77,0.1); color: var(--red); border: 1px solid rgba(255,77,77,0.2); }
+
+  /* Tool block expand */
+  .tool-header { cursor: pointer; user-select: none; }
+  .tool-toggle { margin-left: 4px; font-size: 9px; color: var(--text3); }
+  .tool-path { font-size: 10px; color: var(--text3); font-family: var(--font-mono); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
+  .tool-copy { font-size: 10px; font-family: var(--font-mono); color: var(--text3); background: var(--bg3); border: 1px solid var(--border); border-radius: 4px; padding: 2px 7px; cursor: pointer; flex-shrink: 0; }
+  .tool-copy:hover { color: var(--accent); border-color: var(--accent); }
+
+  /* Status message */
+  .status-msg { font-size: 11px; color: var(--text3); font-family: var(--font-mono); padding: 4px 10px; display: flex; align-items: center; gap: 6px; }
+
+  /* Diff view for edit_file */
+  .diff-view { font-family: var(--font-mono); font-size: 11px; padding: 8px 0; }
+  .diff-old { background: rgba(255,77,77,0.08); border-left: 3px solid var(--red); padding: 4px 10px; color: #ff8a8a; white-space: pre-wrap; word-break: break-all; }
+  .diff-new { background: rgba(0,212,170,0.08); border-left: 3px solid var(--accent); padding: 4px 10px; color: var(--accent); white-space: pre-wrap; word-break: break-all; }
+  .diff-label { font-size: 9px; color: var(--text3); padding: 2px 10px; text-transform: uppercase; letter-spacing: 0.06em; }
+
   /* Markdown rendering */
   .message-bubble h1, .message-bubble h2, .message-bubble h3 { font-weight: 600; margin: 10px 0 4px; line-height: 1.3; }
   .message-bubble h1 { font-size: 16px; }
@@ -310,6 +363,34 @@ function formatTime(iso) {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+function CodeBlock({ lang, code }) {
+  const ref = useRef(null);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (ref.current && window.Prism) {
+      window.Prism.highlightElement(ref.current);
+    }
+  }, [code, lang]);
+  const copy = () => {
+    navigator.clipboard.writeText(code).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+  const langClass = lang ? `language-${lang}` : 'language-plaintext';
+  return (
+    <div className="code-wrap">
+      <div className="code-header">
+        <span className="code-lang-label">{lang || 'code'}</span>
+        <button className={`copy-btn${copied ? ' copied' : ''}`} onClick={copy}>{copied ? '✓ copied' : 'copy'}</button>
+      </div>
+      <pre className={langClass} style={{borderTopLeftRadius:0,borderTopRightRadius:0,margin:0}}>
+        <code ref={ref} className={langClass}>{code}</code>
+      </pre>
+    </div>
+  );
+}
+
 function renderInline(text) {
   // Render inline markdown: bold, italic, code
   const parts = text.split(/(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/g);
@@ -333,7 +414,7 @@ function renderContent(text) {
       const lines = block.slice(3, -3).split('\n');
       const lang = lines[0].trim();
       const code = lines.slice(lang ? 1 : 0).join('\n');
-      result.push(<pre key={bi}><code>{code || lang}</code></pre>);
+      result.push(<CodeBlock key={bi} lang={lang} code={code || lang} />);
       return;
     }
 
@@ -388,24 +469,73 @@ function renderContent(text) {
   return result;
 }
 
+const TOOL_ICONS = { shell:'💻', read_file:'📖', write_file:'✍️', edit_file:'✏️', list_dir:'📁', web_search:'🔍', manage_memory:'🧠', git:'🌿', http_request:'🌐', ssh:'🔌' };
+
 function ToolBlock({ call, result }) {
+  const [expanded, setExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const icon = TOOL_ICONS[call.tool] || (call.tool?.startsWith('mcp__') ? '🔌' : '⚙');
+  const pathArg = call.args?.path || call.args?.url || '';
+  const shortPath = pathArg ? pathArg.split('/').slice(-2).join('/') : '';
+  const isDiff = call.tool === 'edit_file';
+
+  const copyResult = (e) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(result || '').then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+
+  const displayName = call.tool?.startsWith('mcp__')
+    ? call.tool.slice(5).replace('__', '/')
+    : call.tool;
+
   return (
     <div className="tool-block">
-      <div className="tool-header">
-        <span>⚙</span>
-        <span className="tool-name">{call.tool}</span>
-        <span className={`tool-status ${result ? 'done' : 'running'}`}>
-          {result ? '✓ done' : '⟳ running'}
+      <div className="tool-header" onClick={() => setExpanded(x => !x)}>
+        <span>{icon}</span>
+        <span className="tool-name">{displayName}</span>
+        {shortPath && <span className="tool-path">{shortPath}</span>}
+        {!shortPath && call.args?.command && (
+          <span className="tool-path">{String(call.args.command).slice(0,60)}</span>
+        )}
+        {!shortPath && call.args?.query && (
+          <span className="tool-path">{String(call.args.query).slice(0,60)}</span>
+        )}
+        <span className={`tool-status ${result ? 'done' : 'running'}`} style={{marginLeft:'auto'}}>
+          {result ? '✓' : '⟳'}
         </span>
+        <span className="tool-toggle">{expanded ? '▾' : '▸'}</span>
       </div>
-      {call.args && Object.keys(call.args).length > 0 && (
-        <div className="tool-args">
-          {Object.entries(call.args).map(([k, v]) => (
-            <div key={k}><span style={{color:'var(--text3)'}}>{k}:</span> {String(v).slice(0, 200)}</div>
-          ))}
-        </div>
+      {expanded && (
+        <>
+          {isDiff && call.args ? (
+            <div className="diff-view">
+              <div className="diff-label">before</div>
+              <div className="diff-old">{'- ' + (call.args.old_text || '').slice(0, 400)}</div>
+              <div className="diff-label">after</div>
+              <div className="diff-new">{'+ ' + (call.args.new_text || '').slice(0, 400)}</div>
+            </div>
+          ) : (
+            call.args && Object.keys(call.args).length > 0 && (
+              <div className="tool-args">
+                {Object.entries(call.args).map(([k, v]) => (
+                  <div key={k}><span style={{color:'var(--text3)'}}>{k}:</span> {String(v).slice(0, 300)}</div>
+                ))}
+              </div>
+            )
+          )}
+          {result && (
+            <div style={{position:'relative'}}>
+              <button className="tool-copy" style={{position:'absolute',top:6,right:8,zIndex:1}} onClick={copyResult}>
+                {copied ? '✓ copied' : 'copy'}
+              </button>
+              <div className="tool-result">{result.slice(0, 2000)}{result.length > 2000 ? '\n…(truncated)' : ''}</div>
+            </div>
+          )}
+        </>
       )}
-      {result && <div className="tool-result">{result.slice(0, 800)}{result.length > 800 ? '\n...(truncated)' : ''}</div>}
     </div>
   );
 }
@@ -415,6 +545,16 @@ function Message({ msg }) {
     return (
       <div className="message assistant">
         <ToolBlock call={msg.call} result={msg.result} />
+      </div>
+    );
+  }
+  if (msg.role === 'status') {
+    return (
+      <div className="message assistant">
+        <div className="status-msg">
+          <span style={{color:'var(--yellow)'}}>◎</span>
+          <span>{msg.content}</span>
+        </div>
       </div>
     );
   }
@@ -441,12 +581,34 @@ function Message({ msg }) {
   return null;
 }
 
+function SkillPopup({ skills, query, onSelect }) {
+  const filtered = skills.filter(s =>
+    !query || s.name.includes(query) || s.description.toLowerCase().includes(query)
+  );
+  if (!filtered.length) return null;
+  return (
+    <div className="skill-popup">
+      <div className="skill-popup-header">skills — press Esc to close</div>
+      {filtered.map(s => (
+        <div key={s.name} className="skill-item" onClick={() => onSelect(s)}>
+          <span className="skill-icon">{s.icon || '⚡'}</span>
+          <span className="skill-name">/{s.name}</span>
+          <span className="skill-desc">{s.description}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function ChatView({ session, model, onRunning, stopRef, draftInput, setDraftInput }) {
   const [messages, setMessages] = useState([]);
   const input = draftInput !== undefined ? draftInput : '';
   const setInput = setDraftInput || (() => {});
   const [loading, setLoading] = useState(false);
   const [stats, setStats] = useState(null);
+  const [skills, setSkills] = useState([]);
+  const [showSkillPopup, setShowSkillPopup] = useState(false);
+  const [skillQuery, setSkillQuery] = useState('');
   const abortRef = useRef(null);
   const requestIdRef = useRef(null);
   const loadingRef = useRef(false);
@@ -457,6 +619,10 @@ function ChatView({ session, model, onRunning, stopRef, draftInput, setDraftInpu
   });
   const bottomRef = useRef(null);
   const textareaRef = useRef(null);
+
+  useEffect(() => {
+    fetch(`${API}/api/skills`).then(r => r.json()).then(d => setSkills(d.skills || []));
+  }, []);
 
   useEffect(() => {
     if (!session) return;
@@ -486,9 +652,23 @@ function ChatView({ session, model, onRunning, stopRef, draftInput, setDraftInpu
 
   const send = async () => {
     if (!input.trim() || loading || !session) return;
-    const text = input.trim();
+    let text = input.trim();
     setInput('');
     if (setDraftInput) setDraftInput('');
+    setShowSkillPopup(false);
+
+    // Expand @/path/to/file mentions
+    const atMentions = [...text.matchAll(/@(\/[\S]+)/g)];
+    for (const [full, path] of atMentions) {
+      try {
+        const r = await fetch(`${API}/api/file?path=${encodeURIComponent(path)}`);
+        if (r.ok) {
+          const d = await r.json();
+          const ext = path.split('.').pop();
+          text = text.replace(full, `\n\`\`\`${ext}\n// @${path}\n${d.content.trim()}\n\`\`\`\n`);
+        }
+      } catch(e) {}
+    }
     setLoading(true); loadingRef.current = true; onRunning && onRunning(true);
 
     const userMsg = { id: Date.now(), role: 'user', content: text, created_at: new Date().toISOString() };
@@ -536,9 +716,14 @@ function ChatView({ session, model, onRunning, stopRef, draftInput, setDraftInpu
             if (!line.startsWith('data: ')) continue;
             try {
               const data = JSON.parse(line.slice(6));
-              if (data.type === 'thinking') {
+              if (data.type === 'status') {
                 setMessages(prev => {
-                  const filtered = prev.filter(m => m.role !== 'thinking');
+                  const filtered = prev.filter(m => m.role !== 'thinking' && m.role !== 'status');
+                  return [...filtered, { id: `status-${Date.now()}`, role: 'status', content: data.message }];
+                });
+              } else if (data.type === 'thinking') {
+                setMessages(prev => {
+                  const filtered = prev.filter(m => m.role !== 'thinking' && m.role !== 'status');
                   return [...filtered, { id: thinkingId, role: 'thinking' }];
                 });
               } else if (data.type === 'tool_call') {
@@ -564,7 +749,7 @@ function ChatView({ session, model, onRunning, stopRef, draftInput, setDraftInpu
                 setMessages(prev => prev.filter(m => m.role === 'user' || m.role === 'assistant' || m.role === 'tool_call'));
               } else if (data.type === 'done') {
                 requestIdRef.current = null;
-                setMessages(prev => prev.filter(m => m.role === 'user' || m.role === 'assistant' || m.role === 'tool_call'));
+                setMessages(prev => prev.filter(m => ['user','assistant','tool_call'].includes(m.role)));
                 if (data.total_tokens) {
                   setStats({ tps: (data.total_tokens / data.elapsed).toFixed(1), ctx: data.total_tokens, tokens: data.total_tokens, elapsed: data.elapsed, iterations: data.iterations, mode: 'agent' });
                 }
@@ -618,7 +803,27 @@ function ChatView({ session, model, onRunning, stopRef, draftInput, setDraftInpu
     setLoading(false); loadingRef.current = false; onRunning && onRunning(false);
   };
 
+  const handleInputChange = (e) => {
+    const val = e.target.value;
+    setInput(val);
+    const m = val.match(/^\/(\w*)$/);
+    if (m) {
+      setSkillQuery(m[1].toLowerCase());
+      setShowSkillPopup(true);
+    } else {
+      setShowSkillPopup(false);
+      setSkillQuery('');
+    }
+  };
+
+  const selectSkill = (skill) => {
+    setInput(skill.prompt);
+    setShowSkillPopup(false);
+    setTimeout(() => textareaRef.current?.focus(), 0);
+  };
+
   const onKeyDown = (e) => {
+    if (e.key === 'Escape') { setShowSkillPopup(false); return; }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       send();
@@ -661,28 +866,33 @@ function ChatView({ session, model, onRunning, stopRef, draftInput, setDraftInpu
         </div>
       )}
       <div className="input-area">
-        <div className="input-row">
-          <div className="input-wrap">
-            <textarea
-              ref={textareaRef}
-              className="input-box"
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={onKeyDown}
-              placeholder={session.mode === 'agent' ? 'Give the agent a task...' : 'Message...'}
-              rows={1}
-              style={{height: 'auto'}}
-              onInput={e => { e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px'; }}
-              disabled={loading}
-            />
-          </div>
-          {loading ? (
-            <button className="stop-btn" onClick={stop} style={{minWidth:80}}>■ Stop</button>
-          ) : (
-            <button className="send-btn" onClick={send} disabled={!input.trim()}>Send</button>
+        <div className="input-outer">
+          {showSkillPopup && (
+            <SkillPopup skills={skills} query={skillQuery} onSelect={selectSkill} />
           )}
+          <div className="input-row">
+            <div className="input-wrap">
+              <textarea
+                ref={textareaRef}
+                className="input-box"
+                value={input}
+                onChange={handleInputChange}
+                onKeyDown={onKeyDown}
+                placeholder={session.mode === 'agent' ? 'Give the agent a task… or type / for skills, @ for files' : 'Message… or type / for skills'}
+                rows={1}
+                style={{height: 'auto'}}
+                onInput={e => { e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px'; }}
+                disabled={loading}
+              />
+            </div>
+            {loading ? (
+              <button className="stop-btn" onClick={stop} style={{minWidth:80}}>■ Stop</button>
+            ) : (
+              <button className="send-btn" onClick={send} disabled={!input.trim()}>Send</button>
+            )}
+          </div>
         </div>
-        <div className="input-hint">Enter to send · Shift+Enter for new line</div>
+        <div className="input-hint">Enter to send · Shift+Enter for newline · / for skills · @/path for files</div>
       </div>
     </>
   );
@@ -1002,11 +1212,59 @@ function SettingsModal({ onClose }) {
   const [showAddRemote, setShowAddRemote] = useState(false);
   const [newRemote, setNewRemote] = useState({ name: '', host: '', user: '', port: '22', key_path: '', password: '', auth: 'key' });
   const [saved, setSaved] = useState(false);
+  const [mcpServers, setMcpServers] = useState([]);
+  const [showAddMcp, setShowAddMcp] = useState(false);
+  const [newMcp, setNewMcp] = useState({ name: '', command: '' });
+  const [mcpMsg, setMcpMsg] = useState('');
+  const [allSkills, setAllSkills] = useState([]);
+  const [newSkill, setNewSkill] = useState({ name: '', description: '', prompt: '', icon: '⚡' });
+  const [showAddSkill, setShowAddSkill] = useState(false);
+
+  const loadMcp = () => fetch('/api/mcp').then(r => r.json()).then(d => setMcpServers(d.servers || []));
+  const loadSkills = () => fetch('/api/skills').then(r => r.json()).then(d => setAllSkills(d.skills || []));
 
   useEffect(() => {
     fetch('/api/settings').then(r => r.json()).then(setSettings);
     fetch('/api/remotes').then(r => r.json()).then(d => setRemotes(d.remotes || []));
+    loadMcp();
+    loadSkills();
   }, []);
+
+  const addMcp = async () => {
+    if (!newMcp.name || !newMcp.command) return;
+    setMcpMsg('Connecting…');
+    const r = await fetch('/api/mcp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newMcp) });
+    const d = await r.json();
+    setMcpMsg(d.ok ? `✓ ${d.message}` : `✗ ${d.message}`);
+    setMcpServers(d.servers || []);
+    if (d.ok) { setNewMcp({ name: '', command: '' }); setShowAddMcp(false); }
+  };
+
+  const deleteMcp = async (name) => {
+    await fetch(`/api/mcp/${name}`, { method: 'DELETE' });
+    loadMcp();
+  };
+
+  const reconnectMcp = async (name) => {
+    setMcpMsg(`Reconnecting ${name}…`);
+    const r = await fetch(`/api/mcp/${name}/reconnect`, { method: 'POST' });
+    const d = await r.json();
+    setMcpMsg(d.ok ? `✓ ${d.message}` : `✗ ${d.message}`);
+    setMcpServers(d.servers || []);
+  };
+
+  const addSkill = async () => {
+    if (!newSkill.name || !newSkill.prompt) return;
+    await fetch('/api/skills', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newSkill) });
+    setNewSkill({ name: '', description: '', prompt: '', icon: '⚡' });
+    setShowAddSkill(false);
+    loadSkills();
+  };
+
+  const deleteSkill = async (name) => {
+    await fetch(`/api/skills/${name}`, { method: 'DELETE' });
+    loadSkills();
+  };
 
   const saveSettings = async () => {
     await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings) });
@@ -1041,7 +1299,7 @@ function SettingsModal({ onClose }) {
           <button className="modal-close" onClick={onClose}>✕</button>
         </div>
         <div className="modal-tabs">
-          {['general', 'remotes', 'agent', 'prompts'].map(t => (
+          {['general', 'remotes', 'mcp', 'skills', 'agent', 'prompts'].map(t => (
             <div key={t} className={`modal-tab ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>{t}</div>
           ))}
         </div>
@@ -1150,6 +1408,123 @@ function SettingsModal({ onClose }) {
             </div>
           )}
 
+          {tab === 'mcp' && (
+            <div>
+              <div className="settings-section">
+                <div className="settings-label">MCP Servers</div>
+                <div style={{fontSize:11,color:'var(--text3)',marginBottom:10,lineHeight:1.6}}>
+                  Connect external MCP servers to give the agent additional tools. Servers run as local subprocesses (stdio transport).
+                  Example: <code style={{fontFamily:'var(--font-mono)',color:'var(--accent)'}}>npx -y @modelcontextprotocol/server-filesystem ~/projects</code>
+                </div>
+                {mcpMsg && <div style={{fontSize:11,fontFamily:'var(--font-mono)',color:'var(--accent)',marginBottom:8,padding:'4px 8px',background:'rgba(0,212,170,0.08)',borderRadius:4}}>{mcpMsg}</div>}
+                {mcpServers.map(s => (
+                  <div className="mcp-server-item" key={s.name}>
+                    <div className="mcp-server-header">
+                      <div style={{flex:1,minWidth:0}}>
+                        <div className="mcp-server-name">{s.name}</div>
+                        <div className="mcp-server-cmd">{Array.isArray(s.command) ? s.command.join(' ') : s.command}</div>
+                      </div>
+                      <div style={{display:'flex',alignItems:'center',gap:6,flexShrink:0}}>
+                        <span className={`mcp-status ${s.connected ? 'connected' : 'disconnected'}`}>
+                          {s.connected ? `● ${s.tool_count} tools` : '○ offline'}
+                        </span>
+                        <button className="settings-btn" style={{fontSize:10,padding:'2px 8px'}} onClick={() => reconnectMcp(s.name)}>↺</button>
+                        <span className="remote-del" onClick={() => deleteMcp(s.name)}>✕</span>
+                      </div>
+                    </div>
+                    {s.connected && s.tools.length > 0 && (
+                      <div style={{marginTop:6,display:'flex',flexWrap:'wrap',gap:4}}>
+                        {s.tools.map(t => (
+                          <span key={t.name} style={{fontSize:9,fontFamily:'var(--font-mono)',padding:'1px 6px',background:'rgba(176,108,255,0.1)',color:'var(--purple)',borderRadius:3,border:'1px solid rgba(176,108,255,0.2)'}} title={t.description}>{t.name}</span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+                {!showAddMcp ? (
+                  <button className="settings-btn" style={{marginTop:8}} onClick={() => setShowAddMcp(true)}>+ Add MCP server</button>
+                ) : (
+                  <div className="add-remote-form">
+                    <div className="add-remote-title">New MCP server</div>
+                    <div className="form-field" style={{marginBottom:8}}>
+                      <div className="form-label">Name</div>
+                      <input className="settings-input" value={newMcp.name} onChange={e => setNewMcp({...newMcp, name: e.target.value})} placeholder="filesystem" />
+                    </div>
+                    <div className="form-field" style={{marginBottom:8}}>
+                      <div className="form-label">Command</div>
+                      <input className="settings-input" value={newMcp.command} onChange={e => setNewMcp({...newMcp, command: e.target.value})} placeholder="npx -y @modelcontextprotocol/server-filesystem /path" />
+                    </div>
+                    <div className="settings-row">
+                      <button className="settings-btn primary" onClick={addMcp}>Add &amp; Connect</button>
+                      <button className="settings-btn" onClick={() => { setShowAddMcp(false); setMcpMsg(''); }}>Cancel</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {tab === 'skills' && (
+            <div>
+              <div className="settings-section">
+                <div className="settings-label">Built-in skills</div>
+                <div style={{fontSize:11,color:'var(--text3)',marginBottom:10,lineHeight:1.6}}>
+                  Type <code style={{fontFamily:'var(--font-mono)',color:'var(--accent)'}}>/<b>name</b></code> in chat to fill the input with a skill prompt.
+                </div>
+                {allSkills.filter(s => s._builtin).map(s => (
+                  <div key={s.name} style={{padding:'8px 12px',background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:'var(--radius)',marginBottom:6,display:'flex',alignItems:'center',gap:10}}>
+                    <span style={{fontSize:16}}>{s.icon}</span>
+                    <div style={{flex:1}}>
+                      <div style={{fontFamily:'var(--font-mono)',fontSize:12,color:'var(--accent)'}}>/{s.name}</div>
+                      <div style={{fontSize:11,color:'var(--text2)',marginTop:2}}>{s.description}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="settings-section">
+                <div className="settings-label">Custom skills</div>
+                {allSkills.filter(s => !s._builtin).map(s => (
+                  <div key={s.name} style={{padding:'8px 12px',background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:'var(--radius)',marginBottom:6,display:'flex',alignItems:'center',gap:10}}>
+                    <span style={{fontSize:16}}>{s.icon || '⚡'}</span>
+                    <div style={{flex:1}}>
+                      <div style={{fontFamily:'var(--font-mono)',fontSize:12,color:'var(--accent)'}}>/{s.name}</div>
+                      <div style={{fontSize:11,color:'var(--text2)',marginTop:2}}>{s.description}</div>
+                    </div>
+                    <span className="remote-del" onClick={() => deleteSkill(s.name)}>✕</span>
+                  </div>
+                ))}
+                {!showAddSkill ? (
+                  <button className="settings-btn" style={{marginTop:4}} onClick={() => setShowAddSkill(true)}>+ Add skill</button>
+                ) : (
+                  <div className="add-remote-form">
+                    <div className="form-grid">
+                      <div className="form-field">
+                        <div className="form-label">Name (no spaces)</div>
+                        <input className="settings-input" value={newSkill.name} onChange={e => setNewSkill({...newSkill, name: e.target.value.replace(/\s/,'')})} placeholder="myskill" />
+                      </div>
+                      <div className="form-field">
+                        <div className="form-label">Icon</div>
+                        <input className="settings-input" value={newSkill.icon} onChange={e => setNewSkill({...newSkill, icon: e.target.value})} placeholder="⚡" />
+                      </div>
+                    </div>
+                    <div className="form-field" style={{marginBottom:8}}>
+                      <div className="form-label">Description</div>
+                      <input className="settings-input" value={newSkill.description} onChange={e => setNewSkill({...newSkill, description: e.target.value})} placeholder="Short description" />
+                    </div>
+                    <div className="form-field" style={{marginBottom:8}}>
+                      <div className="form-label">Prompt template</div>
+                      <textarea className="settings-input" rows={3} style={{resize:'vertical'}} value={newSkill.prompt} onChange={e => setNewSkill({...newSkill, prompt: e.target.value})} placeholder="Please do X to the following code:\n\n" />
+                    </div>
+                    <div className="settings-row">
+                      <button className="settings-btn primary" onClick={addSkill}>Add skill</button>
+                      <button className="settings-btn" onClick={() => setShowAddSkill(false)}>Cancel</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {tab === 'agent' && (
             <div>
               <div className="settings-section">
@@ -1204,6 +1579,7 @@ function App() {
   const [activeProject, setActiveProject] = useState(null);
   const [projectsOpen, setProjectsOpen] = useState(true);
   const [showAddProject, setShowAddProject] = useState(false);
+  const [ctxLength, setCtxLength] = useState(8192);
 
   useEffect(() => {
     fetch(`${API}/api/projects`).then(r => r.json()).then(d => setProjects(d.projects || []));
@@ -1211,8 +1587,20 @@ function App() {
       setModels(d.models || []);
       setSelectedModel(d.default || d.models?.[0] || '');
     });
+    fetch(`${API}/api/settings`).then(r => r.json()).then(d => {
+      if (d.context_length) setCtxLength(d.context_length);
+    });
     loadSessions();
   }, []);
+
+  const saveCtxLength = (val) => {
+    setCtxLength(val);
+    fetch(`${API}/api/settings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ context_length: val }),
+    });
+  };
 
   const loadSessions = () => {
     fetch(`${API}/api/sessions`).then(r => r.json()).then(d => setSessions(d.sessions || []));
@@ -1316,6 +1704,16 @@ function App() {
           <select className="model-select" value={selectedModel} onChange={e => setSelectedModel(e.target.value)}>
             {models.map(m => <option key={m} value={m}>{m}</option>)}
           </select>
+          <div style={{display:'flex', alignItems:'center', gap:6, marginTop:6}}>
+            <span style={{fontSize:10, color:'var(--text3)', fontFamily:'var(--font-mono)', flexShrink:0}}>ctx</span>
+            <select className="model-select" value={ctxLength} onChange={e => saveCtxLength(parseInt(e.target.value))}>
+              <option value={4096}>4K</option>
+              <option value={8192}>8K</option>
+              <option value={16384}>16K</option>
+              <option value={32768}>32K</option>
+              <option value={65536}>64K</option>
+            </select>
+          </div>
         </div>
       </div>
 
