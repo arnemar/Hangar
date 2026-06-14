@@ -220,7 +220,7 @@ def _model_hints(model: str) -> str:
             "nothing before or after it (except the optional Plan: prefix on iteration 1). "
             "No markdown, no explanation."
         )
-    if any(x in name for x in ("llama", "mistral", "qwen", "gemma", "phi")):
+    if any(x in name for x in ("llama", "mistral", "qwen", "gemma", "phi", "devstral", "solar")):
         return (
             base +
             "\nFORMAT RULE: Tool calls must be a bare JSON object. "

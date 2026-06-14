@@ -35,7 +35,7 @@ async def stream_ollama(
     if tools:
         payload["tools"] = tools
 
-    async with httpx.AsyncClient(timeout=120) as client:
+    async with httpx.AsyncClient(timeout=600) as client:
         async with client.stream("POST", f"{_url(ollama_url)}/api/chat", json=payload) as resp:
             async for line in resp.aiter_lines():
                 if line.strip():
@@ -63,7 +63,7 @@ async def chat_ollama(
     full_content = ""
     final_data: dict = {}
 
-    async with httpx.AsyncClient(timeout=120) as client:
+    async with httpx.AsyncClient(timeout=600) as client:
         async with client.stream("POST", f"{_url(ollama_url)}/api/chat", json=payload) as resp:
             async for line in resp.aiter_lines():
                 if cancel_event and cancel_event.is_set():
