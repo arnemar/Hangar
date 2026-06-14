@@ -12,8 +12,20 @@ import asyncio
 import json
 import logging
 import os
+import shutil
+import sys
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_cmd(command: list[str]) -> list[str]:
+    """On Windows, .cmd/.bat executables must be launched via cmd /c."""
+    if sys.platform != "win32" or not command:
+        return command
+    exe = shutil.which(command[0])
+    if exe and exe.upper().endswith((".CMD", ".BAT")):
+        return ["cmd.exe", "/c"] + command
+    return command
 
 
 class MCPClient:
@@ -31,8 +43,9 @@ class MCPClient:
     async def start(self) -> tuple[bool, str]:
         try:
             merged_env = {**os.environ, **self.env}
+            resolved = _resolve_cmd(self.command)
             self.process = await asyncio.create_subprocess_exec(
-                *self.command,
+                *resolved,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
@@ -86,20 +99,29 @@ class MCPClient:
     async def _rpc(self, method: str, params: dict) -> dict:
         async with self._lock:
             self._id += 1
+            req_id = self._id
             msg = json.dumps({
                 "jsonrpc": "2.0",
-                "id": self._id,
+                "id": req_id,
                 "method": method,
                 "params": params,
             }) + "\n"
             self.process.stdin.write(msg.encode())
             await self.process.stdin.drain()
-            raw = await asyncio.wait_for(
-                self.process.stdout.readline(), timeout=15.0
-            )
-            if not raw:
-                raise RuntimeError("MCP server closed connection")
-            return json.loads(raw)
+            # Loop to skip notifications (no "id") before our response arrives
+            deadline = asyncio.get_event_loop().time() + 15.0
+            while True:
+                remaining = deadline - asyncio.get_event_loop().time()
+                if remaining <= 0:
+                    raise asyncio.TimeoutError()
+                raw = await asyncio.wait_for(
+                    self.process.stdout.readline(), timeout=remaining
+                )
+                if not raw:
+                    raise RuntimeError("MCP server closed connection")
+                parsed = json.loads(raw)
+                if parsed.get("id") == req_id:
+                    return parsed
 
     def is_alive(self) -> bool:
         return self.process is not None and self.process.returncode is None

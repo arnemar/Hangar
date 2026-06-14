@@ -11,6 +11,8 @@ Cross-platform notes
 
 import asyncio
 import json
+import os
+import re
 import shutil
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
@@ -22,6 +24,13 @@ import httpx
 
 from config import IS_WINDOWS, SHELL_PREFIX
 from storage import get_remote, load_memory, load_settings, save_memory
+
+
+def _expand_path(path: str) -> Path:
+    """Resolve ~, %VAR%, and PowerShell $env:VAR in paths before handing to pathlib."""
+    if IS_WINDOWS:
+        path = re.sub(r'\$env:(\w+)', lambda m: os.environ.get(m.group(1), m.group(0)), path)
+    return Path(os.path.expandvars(path)).expanduser().resolve()
 
 # ── Thread pool for blocking I/O ──────────────────────────────────────────────
 
@@ -85,10 +94,12 @@ def _run_cmd(
     if SHELL_PREFIX:
         return subprocess.run(
             SHELL_PREFIX + [command],
-            capture_output=True, text=True, timeout=timeout, cwd=cwd,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=timeout, cwd=cwd,
         )
     return subprocess.run(
-        command, shell=True, capture_output=True, text=True, timeout=timeout, cwd=cwd,
+        command, shell=True, capture_output=True, text=True,
+        encoding="utf-8", errors="replace", timeout=timeout, cwd=cwd,
     )
 
 
@@ -109,7 +120,7 @@ def _shell_worker(command: str) -> str:
 
 def _git_worker(action: str, path: str, args: str) -> str:
     try:
-        p = Path(path).expanduser().resolve()
+        p = _expand_path(path)
         if not p.exists():
             return f"[error]: Path not found: {path}"
         cmd_map = {
@@ -176,7 +187,7 @@ async def tool_shell(command: str) -> str:
 })
 def tool_read_file(path: str) -> str:
     try:
-        p = Path(path).expanduser().resolve()
+        p = _expand_path(path)
         if not p.exists():
             return f"[error]: File not found: {path}"
         if p.stat().st_size > 500_000:
@@ -193,7 +204,7 @@ def tool_read_file(path: str) -> str:
 })
 def tool_write_file(path: str, content: str, mode: str = "overwrite") -> str:
     try:
-        p = Path(path).expanduser().resolve()
+        p = _expand_path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
         if mode == "append":
             with open(p, "a", encoding="utf-8") as f:
@@ -212,7 +223,7 @@ def tool_write_file(path: str, content: str, mode: str = "overwrite") -> str:
 })
 def tool_edit_file(path: str, old_text: str, new_text: str) -> str:
     try:
-        p = Path(path).expanduser().resolve()
+        p = _expand_path(path)
         if not p.exists():
             return f"[error]: File not found: {path}"
         content = p.read_text(errors="replace")
@@ -230,7 +241,7 @@ def tool_edit_file(path: str, old_text: str, new_text: str) -> str:
 })
 def tool_list_dir(path: str = "~") -> str:
     try:
-        p = Path(path).expanduser().resolve()
+        p = _expand_path(path)
         if not p.exists():
             return f"[error]: Path not found: {path}"
         if not p.is_dir():
