@@ -71,7 +71,11 @@ _DS_PATTERNS = [
 ]
 
 
+_THINK_RE = re.compile(r'<think>[\s\S]*?</think>', re.IGNORECASE)
+
+
 def _strip_ds(text: str) -> str:
+    text = _THINK_RE.sub("", text)
     for pat in _DS_PATTERNS:
         text = pat.sub("", text)
     return text.strip()
