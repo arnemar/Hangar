@@ -603,9 +603,15 @@ class _PythonExtractor:
         return "public"
 
     def _sig(self, stmt: "_ast.stmt", lines: list[str]) -> str:
-        """First line of the definition (contains name and params)."""
-        idx = stmt.lineno - 1
-        return lines[idx].strip()[:200] if 0 <= idx < len(lines) else ""
+        """Full function/class header (name + all params), up to the body colon."""
+        start = stmt.lineno - 1
+        if hasattr(stmt, "body") and stmt.body:
+            end = stmt.body[0].lineno - 1
+        else:
+            end = start + 1
+        end = min(end, start + 30, len(lines))
+        seg = " ".join(l.strip() for l in lines[start:end])
+        return seg[:300]
 
     def _src(self, stmt: "_ast.stmt", source: str) -> str:
         seg = _ast.get_source_segment(source, stmt)

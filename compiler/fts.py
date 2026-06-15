@@ -5,8 +5,8 @@ no business logic. Results are raw node dicts with an added `fts_score` float
 normalized to [0, 1] where 1.0 is the best match.
 
 FTS5 bm25() returns negative values (more negative = better). Normalization:
-    fts_score = 1.0 / (1.0 + abs(bm25_raw))
-This maps -∞..0 → 0..1 monotonically without needing a max-value scan.
+    fts_score = abs(bm25_raw) / (1.0 + abs(bm25_raw))
+This maps 0..-∞ → 0..1 monotonically: stronger matches get higher scores.
 
 Query sanitization: special FTS5 operators (", *, :, ^, ~, (, )) are stripped
 so raw user input and symbol names never break the MATCH expression.
@@ -87,6 +87,6 @@ def fts_query(
     for r in rows:
         row = dict(r)
         raw_score = row.pop("bm25_raw", 0.0) or 0.0
-        row["fts_score"] = 1.0 / (1.0 + abs(raw_score))
+        row["fts_score"] = abs(raw_score) / (1.0 + abs(raw_score))
         results.append(row)
     return results
