@@ -333,19 +333,13 @@ Project structure:
 
 # ── Planner ───────────────────────────────────────────────────────────────────
 
-async def generate_plan(
+async def _stream_plan(
     task: str,
     planner_model: str,
     ollama_url: str,
     num_ctx: int,
-) -> Optional[str]:
-    """Call the planner model once to produce a numbered execution plan.
-
-    Designed to be used with a reasoning model (e.g. deepseek-r1:7b) before
-    the main agent loop runs on the coding model.  The planner sees only the
-    task description and returns concise numbered steps — no tool calls, no
-    code, just a plan.
-    """
+) -> AsyncGenerator[str, None]:
+    """Stream planner output as SSE events (think_stream, think_end, plan_stream, plan)."""
     messages = [
         {
             "role": "system",
@@ -364,18 +358,36 @@ async def generate_plan(
         },
         {"role": "user", "content": f"Task: {task}"},
     ]
+    plan_buffer = ""
+    was_thinking = False
     try:
-        resp = await chat_ollama(
-            messages, planner_model,
-            num_ctx=min(4096, num_ctx),
-            ollama_url=ollama_url,
-        )
-        plan = resp.get("message", {}).get("content", "").strip()
-        # Strip any <think>...</think> block that reasoning models emit
-        plan = re.sub(r'<think>[\s\S]*?</think>', '', plan, flags=re.IGNORECASE).strip()
-        return plan or None
+        async for line in stream_ollama(messages, planner_model, num_ctx=min(4096, num_ctx), ollama_url=ollama_url):
+            if not line.strip():
+                continue
+            try:
+                data = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            msg = data.get("message", {})
+            think_chunk = msg.get("thinking", "")
+            chunk = msg.get("content", "")
+            if think_chunk:
+                was_thinking = True
+                yield f"data: {json.dumps({'type': 'think_stream', 'content': think_chunk})}\n\n"
+            if chunk:
+                if was_thinking:
+                    was_thinking = False
+                    yield f"data: {json.dumps({'type': 'think_end'})}\n\n"
+                plan_buffer += chunk
+                yield f"data: {json.dumps({'type': 'plan_stream', 'content': chunk})}\n\n"
+            if data.get("done"):
+                break
     except Exception:
-        return None
+        pass
+    if was_thinking:
+        yield f"data: {json.dumps({'type': 'think_end'})}\n\n"
+    plan_text = _THINK_RE.sub("", plan_buffer).strip()
+    yield f"data: {json.dumps({'type': 'plan', 'content': plan_text, 'model': planner_model})}\n\n"
 
 
 # ── Agent loop ────────────────────────────────────────────────────────────────
@@ -410,12 +422,16 @@ async def run_agent_stream(
 
     # ── Optional planner pre-pass ─────────────────────────────────────────────
     planner_model = settings.get("planner_model", "").strip()
-    plan_text = None
+    plan_text = ""
     if planner_model and planner_model != model:
-        yield f"data: {json.dumps({'type': 'status', 'message': f'planning with {planner_model}…'})}\n\n"
-        plan_text = await generate_plan(message, planner_model, ollama_url, num_ctx)
-        if plan_text:
-            yield f"data: {json.dumps({'type': 'plan', 'content': plan_text, 'model': planner_model})}\n\n"
+        async for event in _stream_plan(message, planner_model, ollama_url, num_ctx):
+            yield event
+            try:
+                d = json.loads(event.removeprefix("data: ").rstrip("\n"))
+                if d.get("type") == "plan":
+                    plan_text = d.get("content", "")
+            except Exception:
+                pass
 
     # Build user turn — inject plan as context when available
     if plan_text:

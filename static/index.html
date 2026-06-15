@@ -607,7 +607,12 @@ function Message({ msg }) {
     return (
       <div className="message assistant">
         <div className={`plan-msg${multiline ? ' plan-msg-block' : ''}`}>
-          <span className="plan-label">{msg.model ? `plan · ${msg.model}` : 'plan'}</span>
+          <span className="plan-label">
+            {msg.streaming ? 'planning' : (msg.model ? `plan · ${msg.model}` : 'plan')}
+            {msg.streaming && <span style={{display:'inline-flex',gap:3,marginLeft:6,verticalAlign:'middle'}}>
+              <div className="thinking-dot"/><div className="thinking-dot"/><div className="thinking-dot"/>
+            </span>}
+          </span>
           {multiline
             ? <pre style={{margin:0,fontFamily:'var(--font-mono)',fontSize:11,whiteSpace:'pre-wrap'}}>{msg.content}</pre>
             : msg.content}
@@ -661,6 +666,7 @@ function ChatView({ session, model, onRunning, stopRef, draftInput, setDraftInpu
   const requestIdRef = useRef(null);
   const streamIdRef = useRef(null);
   const thinkIdRef = useRef(null);
+  const planStreamIdRef = useRef(null);
   const loadingRef = useRef(false);
 
   // Wire stop function to parent ref
@@ -780,11 +786,29 @@ function ChatView({ session, model, onRunning, stopRef, draftInput, setDraftInpu
                   const sid = streamIdRef.current;
                   setMessages(prev => prev.map(m => m.id === sid ? { ...m, content: m.content + data.content } : m));
                 }
+              } else if (data.type === 'plan_stream') {
+                if (!planStreamIdRef.current) {
+                  const pid = `plan-${Date.now()}`;
+                  planStreamIdRef.current = pid;
+                  setMessages(prev => {
+                    const filtered = prev.filter(m => m.role !== 'thinking' && m.role !== 'status');
+                    return [...filtered, { id: pid, role: 'plan', content: data.content, streaming: true }];
+                  });
+                } else {
+                  const pid = planStreamIdRef.current;
+                  setMessages(prev => prev.map(m => m.id === pid ? { ...m, content: m.content + data.content } : m));
+                }
               } else if (data.type === 'plan') {
-                setMessages(prev => {
-                  const filtered = prev.filter(m => m.role !== 'thinking' && m.role !== 'status');
-                  return [...filtered, { id: `plan-${Date.now()}`, role: 'plan', content: data.content }];
-                });
+                const pid = planStreamIdRef.current;
+                planStreamIdRef.current = null;
+                if (pid) {
+                  setMessages(prev => prev.map(m => m.id === pid ? { ...m, content: data.content, streaming: false, model: data.model } : m));
+                } else {
+                  setMessages(prev => {
+                    const filtered = prev.filter(m => m.role !== 'thinking' && m.role !== 'status');
+                    return [...filtered, { id: `plan-${Date.now()}`, role: 'plan', content: data.content, model: data.model }];
+                  });
+                }
               } else if (data.type === 'status') {
                 setMessages(prev => {
                   const filtered = prev.filter(m => m.role !== 'thinking' && m.role !== 'status');
@@ -810,12 +834,15 @@ function ChatView({ session, model, onRunning, stopRef, draftInput, setDraftInpu
                 // New iteration: mark think block done, clear streaming bubble, show spinner
                 const oldSid = streamIdRef.current;
                 const oldTid = thinkIdRef.current;
+                const oldPid = planStreamIdRef.current;
                 streamIdRef.current = null;
                 thinkIdRef.current = null;
+                planStreamIdRef.current = null;
                 setMessages(prev => {
                   let filtered = prev.filter(m => m.role !== 'thinking' && m.role !== 'status');
                   if (oldSid) filtered = filtered.filter(m => m.id !== oldSid);
                   if (oldTid) filtered = filtered.map(m => m.id === oldTid ? { ...m, streaming: false } : m);
+                  if (oldPid) filtered = filtered.map(m => m.id === oldPid ? { ...m, streaming: false } : m);
                   return [...filtered, { id: thinkingId, role: 'thinking' }];
                 });
               } else if (data.type === 'tool_call') {
