@@ -1310,7 +1310,7 @@ function ProjectSetupModal({ onClose, onCreated }) {
   );
 }
 
-function SettingsModal({ onClose }) {
+function SettingsModal({ onClose, models = [] }) {
   const [tab, setTab] = useState('general');
   const [settings, setSettings] = useState(null);
   const [remotes, setRemotes] = useState([]);
@@ -1421,7 +1421,10 @@ function SettingsModal({ onClose }) {
               </div>
               <div className="settings-section">
                 <div className="settings-label">Default model</div>
-                <input className="settings-input" value={settings.default_model || ''} onChange={e => setSettings({...settings, default_model: e.target.value})} placeholder="deepseek-coder-v2:16b" />
+                <select className="settings-input" value={settings.default_model || ''} onChange={e => setSettings({...settings, default_model: e.target.value})}>
+                  <option value="">— none (use toolbar selection) —</option>
+                  {models.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
               </div>
               <div className="settings-section">
                 <div className="settings-label">Context length (tokens)</div>
@@ -1648,7 +1651,10 @@ function SettingsModal({ onClose }) {
                   Reasoning model to plan before the main agent acts. Runs once per task then hands off.
                   Leave empty to disable. Example: <span style={{fontFamily:'var(--font-mono)',color:'var(--text2)'}}>deepseek-r1:7b</span>
                 </div>
-                <input className="settings-input" placeholder="e.g. deepseek-r1:7b" value={settings.planner_model || ''} onChange={e => setSettings({...settings, planner_model: e.target.value})} />
+                <select className="settings-input" value={settings.planner_model || ''} onChange={e => setSettings({...settings, planner_model: e.target.value})}>
+                  <option value="">— disabled —</option>
+                  {models.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
               </div>
               <div className="settings-section">
                 <button className="settings-btn primary" onClick={saveSettings}>{saved ? '✓ Saved' : 'Save changes'}</button>
@@ -1853,7 +1859,7 @@ function App() {
           <ChatView session={currentSession} model={selectedModel} onRunning={setIsRunning} stopRef={globalStopRef} draftInput={draftInput} setDraftInput={setDraftInput} />
         )}
       </div>
-      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} models={models} />}
       {showAddProject && (
         <ProjectSetupModal
           onClose={() => setShowAddProject(false)}
