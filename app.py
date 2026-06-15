@@ -522,8 +522,41 @@ async def compile_project_route(name: str):
             "removed": result.nodes_removed,
         },
         "edges_created": result.edges_created,
+        "edges_resolved": result.edges_resolved,
         "errors": result.errors,
     }
+
+
+@app.post("/api/compiler/{name}/link")
+async def link_project_route(name: str):
+    """Run the linker pass only (resolve cross-file edges without full recompile)."""
+    import asyncio
+    from compiler.linker import link
+
+    p = get_project(name)
+    if not p:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    lr = await asyncio.to_thread(link, name)
+    return {
+        "ok": True,
+        "project": name,
+        "resolved": lr.resolved,
+        "failed": lr.failed,
+        "errors": lr.errors,
+    }
+
+
+@app.get("/api/compiler/{name}/state")
+async def get_compile_state(name: str):
+    """Return the current compilation state for a project."""
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT * FROM project_state WHERE project_id = ?", (name,)
+        ).fetchone()
+    if not row:
+        return {"project": name, "compiled": False}
+    return {"project": name, "compiled": True, **dict(row)}
 
 
 @app.get("/api/compiler/{name}/search")

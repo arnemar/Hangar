@@ -177,4 +177,19 @@ def init_db() -> None:
                 created_at   TEXT NOT NULL,
                 FOREIGN KEY (node_id) REFERENCES nodes(id)
             );
+
+            -- ── Compiler: project compile state ───────────────────────────
+            -- Lightweight epoch tracking. is_compiling=1 prevents concurrent
+            -- compile runs; graph_version monotonically increments per run.
+            -- unresolved_edges is updated by the linker after each compile.
+            CREATE TABLE IF NOT EXISTS project_state (
+                project_id          TEXT PRIMARY KEY,
+                graph_version       INTEGER DEFAULT 0,
+                is_compiling        INTEGER DEFAULT 0,
+                last_compile_started  TEXT,
+                last_compile_finished TEXT,
+                total_nodes         INTEGER DEFAULT 0,
+                total_edges         INTEGER DEFAULT 0,
+                unresolved_edges    INTEGER DEFAULT 0
+            );
         """)

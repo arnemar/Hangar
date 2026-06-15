@@ -28,6 +28,7 @@ from pathlib import Path
 from compiler.discovery import scan, ScanResult
 from compiler.canonicalizer import canonicalize
 from compiler.graph_builder import build, BuildResult
+from compiler.linker import link, LinkResult
 from compiler.events import emit
 from db import get_db
 
@@ -44,7 +45,46 @@ class PipelineResult:
     nodes_updated: int = 0
     nodes_removed: int = 0
     edges_created: int = 0
+    edges_resolved: int = 0
     errors: list[str] = field(default_factory=list)
+
+
+def _project_state_start(project_id: str, now: str) -> None:
+    with get_db() as conn:
+        conn.execute(
+            """INSERT INTO project_state (project_id, is_compiling, last_compile_started)
+               VALUES (?, 1, ?)
+               ON CONFLICT(project_id) DO UPDATE SET
+                   is_compiling = 1,
+                   last_compile_started = excluded.last_compile_started""",
+            (project_id, now),
+        )
+
+
+def _project_state_finish(project_id: str, now: str) -> None:
+    with get_db() as conn:
+        total_nodes = conn.execute(
+            "SELECT COUNT(*) FROM nodes WHERE project_id = ?", (project_id,)
+        ).fetchone()[0]
+        total_edges = conn.execute(
+            "SELECT COUNT(*) FROM edges e JOIN nodes n ON e.from_id = n.id WHERE n.project_id = ?",
+            (project_id,)
+        ).fetchone()[0]
+        unresolved = conn.execute(
+            "SELECT COUNT(*) FROM edges e JOIN nodes n ON e.from_id = n.id WHERE n.project_id = ? AND e.resolved = 0",
+            (project_id,)
+        ).fetchone()[0]
+        conn.execute(
+            """UPDATE project_state SET
+               is_compiling = 0,
+               last_compile_finished = ?,
+               graph_version = graph_version + 1,
+               total_nodes = ?,
+               total_edges = ?,
+               unresolved_edges = ?
+               WHERE project_id = ?""",
+            (now, total_nodes, total_edges, unresolved, project_id),
+        )
 
 
 def _load_changed_files(project_id: str) -> list[dict]:
@@ -82,8 +122,13 @@ def compile_project(project_id: str, root: str | Path) -> PipelineResult:
     Returns:
         PipelineResult with counters and any errors.
     """
+    from datetime import datetime, timezone
+
     root = Path(root).resolve()
     result = PipelineResult()
+    now = datetime.now(timezone.utc).isoformat()
+
+    _project_state_start(project_id, now)
 
     # ── Phase 1: filesystem scan ──────────────────────────────────────────────
     logger.info("[pipeline] scanning %s", root)
@@ -150,6 +195,16 @@ def compile_project(project_id: str, root: str | Path) -> PipelineResult:
 
     if result.errors:
         logger.warning("[pipeline] %d files failed", result.files_failed)
+
+    # ── Phase 3: link cross-file edges ────────────────────────────────────────
+    if result.files_compiled > 0 or result.scan.discovered > 0:
+        logger.info("[pipeline] running linker")
+        lr = link(project_id)
+        result.edges_resolved = lr.resolved
+        result.errors.extend(lr.errors)
+
+    finish_time = datetime.now(timezone.utc).isoformat()
+    _project_state_finish(project_id, finish_time)
 
     logger.info(
         "[pipeline] done — compiled=%d skipped_ir=%d failed=%d "
