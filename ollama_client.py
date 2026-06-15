@@ -19,10 +19,6 @@ async def get_models(ollama_url: str = "") -> list[str]:
         return []
 
 
-def _no_think(model: str) -> bool:
-    return "qwen3" in model.lower()
-
-
 async def stream_ollama(
     messages: list,
     model: str,
@@ -36,8 +32,6 @@ async def stream_ollama(
         "stream": True,
         "options": {"num_ctx": num_ctx},
     }
-    if _no_think(model):
-        payload["think"] = False
     if tools:
         payload["tools"] = tools
 
@@ -63,8 +57,6 @@ async def chat_ollama(
         "stream": True,
         "options": {"num_ctx": num_ctx},
     }
-    if _no_think(model):
-        payload["think"] = False
     if tools:
         payload["tools"] = tools
 

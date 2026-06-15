@@ -118,6 +118,11 @@ if (window.Prism && Prism.plugins && Prism.plugins.autoloader) {
   .thinking-dot:nth-child(2) { animation-delay: 0.2s; }
   .thinking-dot:nth-child(3) { animation-delay: 0.4s; }
   @keyframes pulse { 0%,80%,100% { opacity: 0.3; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1); } }
+  /* Think block */
+  .think-block { border-left: 2px solid var(--accent); border-radius: 0 var(--radius) var(--radius) 0; overflow: hidden; background: var(--bg2); }
+  .think-header { display: flex; align-items: center; gap: 8px; padding: 6px 10px; cursor: pointer; font-size: 12px; color: var(--text2); user-select: none; }
+  .think-header:hover { background: var(--bg3); }
+  .think-content { padding: 8px 12px; font-size: 11px; font-family: var(--font-mono); color: var(--text2); white-space: pre-wrap; max-height: 300px; overflow-y: auto; border-top: 1px solid var(--border); line-height: 1.5; }
 
   /* Code blocks */
   .message-bubble pre { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 10px; margin: 8px 0; overflow-x: auto; font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
@@ -580,6 +585,23 @@ function Message({ msg }) {
       </div>
     );
   }
+  if (msg.role === 'think_block') {
+    const [open, setOpen] = React.useState(msg.streaming);
+    return (
+      <div className="message assistant">
+        <div className="think-block">
+          <div className="think-header" onClick={() => setOpen(o => !o)}>
+            <span>💭</span>
+            <span style={{flex:1}}>{msg.streaming ? 'Thinking...' : 'Thought process'}</span>
+            {msg.streaming
+              ? <div className="thinking-dots"><div className="thinking-dot"/><div className="thinking-dot"/><div className="thinking-dot"/></div>
+              : <span style={{fontSize:10}}>{open ? '▲' : '▼'}</span>}
+          </div>
+          {open && <div className="think-content">{msg.content}</div>}
+        </div>
+      </div>
+    );
+  }
   if (msg.role === 'plan') {
     const multiline = msg.content.includes('\n');
     return (
@@ -638,6 +660,7 @@ function ChatView({ session, model, onRunning, stopRef, draftInput, setDraftInpu
   const abortRef = useRef(null);
   const requestIdRef = useRef(null);
   const streamIdRef = useRef(null);
+  const thinkIdRef = useRef(null);
   const loadingRef = useRef(false);
 
   // Wire stop function to parent ref
@@ -767,13 +790,28 @@ function ChatView({ session, model, onRunning, stopRef, draftInput, setDraftInpu
                   const filtered = prev.filter(m => m.role !== 'thinking' && m.role !== 'status');
                   return [...filtered, { id: `status-${Date.now()}`, role: 'status', content: data.message }];
                 });
+              } else if (data.type === 'think_stream') {
+                if (!thinkIdRef.current) {
+                  const tid = `think-${Date.now()}`;
+                  thinkIdRef.current = tid;
+                  setMessages(prev => {
+                    const filtered = prev.filter(m => m.role !== 'thinking' && m.role !== 'status');
+                    return [...filtered, { id: tid, role: 'think_block', content: data.content, streaming: true }];
+                  });
+                } else {
+                  const tid = thinkIdRef.current;
+                  setMessages(prev => prev.map(m => m.id === tid ? { ...m, content: m.content + data.content } : m));
+                }
               } else if (data.type === 'thinking') {
-                // New iteration: clear streaming bubble (was JSON thinking) and show spinner
+                // New iteration: mark think block done, clear streaming bubble, show spinner
                 const oldSid = streamIdRef.current;
+                const oldTid = thinkIdRef.current;
                 streamIdRef.current = null;
+                thinkIdRef.current = null;
                 setMessages(prev => {
                   let filtered = prev.filter(m => m.role !== 'thinking' && m.role !== 'status');
                   if (oldSid) filtered = filtered.filter(m => m.id !== oldSid);
+                  if (oldTid) filtered = filtered.map(m => m.id === oldTid ? { ...m, streaming: false } : m);
                   return [...filtered, { id: thinkingId, role: 'thinking' }];
                 });
               } else if (data.type === 'tool_call') {
@@ -791,11 +829,14 @@ function ChatView({ session, model, onRunning, stopRef, draftInput, setDraftInpu
                   setMessages(prev => prev.map(m => m.id === tcId ? { ...m, result: data.result } : m));
                 }
               } else if (data.type === 'response') {
-                // Final answer: finalize streaming bubble or create new bubble
+                // Final answer: finalize think block, streaming bubble, or create new bubble
                 const sid = streamIdRef.current;
+                const tid = thinkIdRef.current;
                 streamIdRef.current = null;
+                thinkIdRef.current = null;
                 setMessages(prev => {
-                  const filtered = prev.filter(m => m.role !== 'thinking' && m.role !== 'status');
+                  let filtered = prev.filter(m => m.role !== 'thinking' && m.role !== 'status');
+                  if (tid) filtered = filtered.map(m => m.id === tid ? { ...m, streaming: false } : m);
                   if (sid) {
                     return filtered.map(m => m.id === sid ? { ...m, content: data.content, streaming: false } : m);
                   }

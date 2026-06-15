@@ -452,6 +452,7 @@ async def run_agent_stream(
 
         # ── Stream the model response token-by-token ──────────────────────────
         raw = ""
+        in_think = False
         iter_tokens = 0
 
         try:
@@ -467,7 +468,24 @@ async def run_agent_stream(
                 chunk = data.get("message", {}).get("content", "")
                 if chunk:
                     raw += chunk
-                    yield f"data: {json.dumps({'type': 'agent_stream', 'content': chunk})}\n\n"
+                    if "<think>" in chunk:
+                        in_think = True
+                        before, _, after = chunk.partition("<think>")
+                        if before:
+                            yield f"data: {json.dumps({'type': 'agent_stream', 'content': before})}\n\n"
+                        if after:
+                            yield f"data: {json.dumps({'type': 'think_stream', 'content': after})}\n\n"
+                    elif "</think>" in chunk:
+                        in_think = False
+                        before, _, after = chunk.partition("</think>")
+                        if before:
+                            yield f"data: {json.dumps({'type': 'think_stream', 'content': before})}\n\n"
+                        if after:
+                            yield f"data: {json.dumps({'type': 'agent_stream', 'content': after})}\n\n"
+                    elif in_think:
+                        yield f"data: {json.dumps({'type': 'think_stream', 'content': chunk})}\n\n"
+                    else:
+                        yield f"data: {json.dumps({'type': 'agent_stream', 'content': chunk})}\n\n"
                 if data.get("done"):
                     iter_tokens = (
                         data.get("eval_count", 0) + data.get("prompt_eval_count", 0)
