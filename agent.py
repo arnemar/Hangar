@@ -235,12 +235,38 @@ def _model_hints(model: str) -> str:
 
 # ── System prompt ─────────────────────────────────────────────────────────────
 
+def _get_compiled_context(project: dict, query: str) -> str:
+    """Return a token-budgeted code context block if the project has a compiled graph."""
+    try:
+        name = project.get("name", "")
+        if not name:
+            return ""
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT graph_version, total_nodes FROM project_state WHERE project_id = ?",
+                (name,)
+            ).fetchone()
+        if not row or not row["total_nodes"]:
+            return ""
+        from compiler.context_builder import build_for_query
+        cb = build_for_query(
+            project_id=name,
+            query=query,
+            intent="find",
+            token_budget=3000,
+        )
+        return cb.text if cb.nodes_shown > 0 else ""
+    except Exception:
+        return ""
+
+
 def _build_system_prompt(
     settings: dict,
     memory: dict,
     project: Optional[dict],
     max_iter: int,
     model: str,
+    query: str = "",
 ) -> str:
     user_name = settings.get("user_name", "")
     extra = settings.get("system_prompt_agent", "")
@@ -296,8 +322,9 @@ Rules:
 - Avoid slow commands; always add limits (head, -maxdepth, etc.)."""
 
     if project:
-        from projects import read_project_file, scan_project_structure
+        from projects import scan_project_structure
 
+        proj_name = project.get("name", "")
         proj_remote = project.get("remote", "")
         proj_root = project.get("root", "")
         loc = f"{proj_remote}:{proj_root}" if proj_remote else proj_root
@@ -308,17 +335,29 @@ Rules:
             if proj_remote
             else "Local — use read_file / write_file / edit_file / shell for file ops"
         )
+
+        compiled_context = _get_compiled_context(project, query) if query else ""
+        has_graph = bool(compiled_context)
+
         prompt += f"""
 
-Active project: {project.get("name")}
+Active project: {proj_name}
 Location: {loc}
 {ssh_note}
 Stay within {proj_root} unless explicitly asked otherwise.
-Always read current file content before editing.
+Always read current file content before editing."""
+
+        if has_graph:
+            prompt += f"""
+This project has a compiled knowledge graph. ALWAYS prefer search_symbols over read_file/list_dir when looking for a symbol — it is faster and returns ranked results. Use graph_expand to trace dependencies once you have a node_id.
+
+{compiled_context}"""
+        else:
+            prompt += """
 When asked about the project, read README.md first, then explore key source files (entry points, config files, main modules) — never answer from the file tree alone.
 
 Project structure:
-{structure[:2000]}"""
+""" + structure[:2000]
 
     if user_name:
         prompt += f"\n\nUser: {user_name}."
@@ -407,7 +446,7 @@ async def run_agent_stream(
     ollama_url = settings.get("ollama_url", "")
 
     project = get_project(project_name) if project_name else None
-    system_prompt = _build_system_prompt(settings, memory, project, max_iter, model)
+    system_prompt = _build_system_prompt(settings, memory, project, max_iter, model, query=message)
 
     with get_db() as conn:
         rows = conn.execute(
