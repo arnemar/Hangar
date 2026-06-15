@@ -506,11 +506,16 @@ def tool_search_symbols(
             src_tags = "+".join(sorted(r.sources))
             lines.append(
                 f"  [{r.kind}] {r.name}{sig}\n"
-                f"    {loc} (score={r.score:.3f}, via={src_tags})"
+                f"    {loc} (score={r.score:.3f}, via={src_tags})\n"
+                f"    node_id: {r.node_id}"
             )
             if r.summary:
                 lines.append(f"    summary: {r.summary}")
 
+        lines.append(
+            "\nTo fetch full source: get_symbol_source(project, node_id)"
+            "\nTo trace dependencies: graph_expand(project, node_ids)"
+        )
         return "\n".join(lines)
 
     except Exception as e:
