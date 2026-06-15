@@ -1310,7 +1310,7 @@ function ProjectSetupModal({ onClose, onCreated }) {
   );
 }
 
-function SettingsModal({ onClose, models = [] }) {
+function SettingsModal({ onClose, models = [], onSave }) {
   const [tab, setTab] = useState('general');
   const [settings, setSettings] = useState(null);
   const [remotes, setRemotes] = useState([]);
@@ -1375,6 +1375,7 @@ function SettingsModal({ onClose, models = [] }) {
     await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings) });
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
+    if (onSave) onSave();
   };
 
   const addRemote = async () => {
@@ -1859,7 +1860,12 @@ function App() {
           <ChatView session={currentSession} model={selectedModel} onRunning={setIsRunning} stopRef={globalStopRef} draftInput={draftInput} setDraftInput={setDraftInput} />
         )}
       </div>
-      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} models={models} />}
+      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} models={models} onSave={() => {
+        fetch(`${API}/api/models`).then(r => r.json()).then(d => {
+          setModels(d.models || []);
+          setSelectedModel(d.default || d.models?.[0] || '');
+        });
+      }} />}
       {showAddProject && (
         <ProjectSetupModal
           onClose={() => setShowAddProject(false)}
