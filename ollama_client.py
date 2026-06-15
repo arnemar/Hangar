@@ -20,7 +20,7 @@ async def get_models(ollama_url: str = "") -> list[str]:
 
 
 def _use_think(model: str) -> bool:
-    return "qwen3" in model.lower()
+    return "qwen3" in model.lower() or "qwq" in model.lower()
 
 
 async def stream_ollama(
