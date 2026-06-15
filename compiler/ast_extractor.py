@@ -213,7 +213,7 @@ class _TSExtractor:
             handler = _TS_NODE_HANDLERS.get(target.type)
             if handler:
                 ir_node = handler(
-                    self, target, project_id, path, source_bytes, language,
+                    target, project_id, path, source_bytes, language,
                     parent_id, parent_name, actual_exported,
                 )
                 if ir_node:
