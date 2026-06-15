@@ -587,6 +587,61 @@ def tool_graph_expand(
         return f"[error]: graph_expand failed: {e}"
 
 
+@tool(
+    "get_symbol_source",
+    (
+        "Fetch the full source code and metadata for a specific symbol by node_id. "
+        "Use this after search_symbols gives you a node_id — it returns the complete "
+        "implementation without needing to know the file path or line numbers."
+    ),
+    {
+        "project": {
+            "type": "string",
+            "description": "Project name",
+        },
+        "node_id": {
+            "type": "string",
+            "description": "Node ID from search_symbols or graph_expand results",
+        },
+    },
+)
+def tool_get_symbol_source(project: str, node_id: str) -> str:
+    try:
+        from compiler.search import symbol_context
+        from storage import get_project
+
+        p = get_project(project)
+        if not p:
+            return f"[error]: Project '{project}' not found."
+
+        ctx = symbol_context(project, node_id)
+        if ctx is None:
+            return f"[error]: Node '{node_id}' not found in project '{project}'."
+
+        lines = [
+            f"[{ctx['kind']}] {ctx['name']}",
+            f"File: {ctx['path']}:{ctx['start_line']}-{ctx['end_line']}",
+        ]
+        if ctx.get("signature"):
+            lines.append(f"Signature: {ctx['signature']}")
+        if ctx.get("summary"):
+            lines.append(f"Summary: {ctx['summary']}")
+        if ctx.get("fan_in") or ctx.get("fan_out"):
+            lines.append(f"Fan-in: {ctx.get('fan_in', 0)}  Fan-out: {ctx.get('fan_out', 0)}")
+        if ctx.get("source"):
+            lang = ctx.get("language", "")
+            lines.append(f"```{lang}")
+            lines.append(ctx["source"].strip())
+            lines.append("```")
+        else:
+            lines.append("(source not available — recompile to extract source)")
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        return f"[error]: get_symbol_source failed: {e}"
+
+
 @tool("ssh", "Run a command on a remote machine via SSH", {
     "remote": {"type": "string", "description": "Remote name from settings (e.g. mac-mini) or user@host"},
     "command": {"type": "string", "description": "Shell command to run on the remote machine"},

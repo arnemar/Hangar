@@ -349,8 +349,33 @@ Always read current file content before editing."""
 
         if has_graph:
             prompt += f"""
-This project has a compiled knowledge graph. ALWAYS prefer search_symbols over read_file/list_dir when looking for a symbol — it is faster and returns ranked results. Use graph_expand to trace dependencies once you have a node_id.
 
+CODE INTELLIGENCE RULES (MANDATORY — compiled graph is available):
+USE search_symbols when:
+  - finding any function, class, method, interface, or type by name
+  - locating where something is defined
+  - understanding what a symbol's signature looks like
+
+USE graph_expand(intent="find") when:
+  - you have a node_id and need to see what it calls or imports
+
+USE graph_expand(intent="impact") when:
+  - you need to know what code depends on a symbol (before editing it)
+
+USE get_symbol_source when:
+  - you have a node_id and need the full implementation
+
+USE read_file ONLY when:
+  - search_symbols returned zero results AND you know the exact file path
+  - reading non-code files (README, SQL, YAML config, package.json)
+  - reading a specific range you already located via search_symbols
+
+PROHIBITED when graph is available:
+  - list_dir to explore project structure
+  - shell grep/find to locate symbols
+  - read_file as a first step for any symbol lookup
+
+Context retrieved for this query:
 {compiled_context}"""
         else:
             prompt += """
