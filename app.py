@@ -526,6 +526,44 @@ async def compile_project_route(name: str):
     }
 
 
+@app.get("/api/compiler/{name}/search")
+async def search_project_symbols(
+    name: str, q: str = "", intent: str = "find", kinds: str = "", limit: int = 20
+):
+    """Text search over the knowledge graph using FTS5 + optional graph expansion."""
+    from compiler.search import find_symbols
+
+    p = get_project(name)
+    if not p:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if not q:
+        raise HTTPException(status_code=400, detail="q parameter required")
+
+    kind_list = [k.strip() for k in kinds.split(",") if k.strip()] if kinds else None
+    results = find_symbols(name, q, intent=intent, kinds=kind_list, max_results=limit)
+    return {
+        "results": [
+            {
+                "node_id": r.node_id,
+                "score": round(r.score, 4),
+                "sources": sorted(r.sources),
+                "explanation": r.explanation,
+                "kind": r.kind,
+                "name": r.name,
+                "path": r.path,
+                "signature": r.signature,
+                "start_line": r.start_line,
+                "end_line": r.end_line,
+                "language": r.language,
+                "fan_in": r.fan_in,
+                "summary": r.summary,
+            }
+            for r in results
+        ],
+        "count": len(results),
+    }
+
+
 @app.get("/api/compiler/{name}/nodes")
 async def get_project_nodes(name: str, kind: str = "", limit: int = 100):
     """Query graph nodes for a project, optionally filtered by kind."""

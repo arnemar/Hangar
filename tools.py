@@ -425,6 +425,168 @@ def _ssh_subprocess(
     return output.strip() or "(no output)"
 
 
+# ── Knowledge graph ───────────────────────────────────────────────────────────
+
+@tool(
+    "search_symbols",
+    (
+        "Search the compiled knowledge graph for functions, classes, types, or any symbol "
+        "by name or description. Returns ranked results with file locations, signatures, "
+        "and relevance scores. Use this instead of read_file/list_dir when looking for "
+        "a specific symbol or understanding what a codebase exports."
+    ),
+    {
+        "project": {
+            "type": "string",
+            "description": "Project name (must be registered in settings)",
+        },
+        "query": {
+            "type": "string",
+            "description": "Symbol name, partial name, or short description",
+        },
+        "intent": {
+            "type": "string",
+            "description": (
+                "Search intent — controls ranking weights. "
+                "find (default): locate a symbol; "
+                "edit: find high-impact symbols safe to change; "
+                "debug: surface recently active code; "
+                "explain: prioritise docs/signatures"
+            ),
+        },
+        "kinds": {
+            "type": "string",
+            "description": (
+                "Comma-separated node kinds to restrict results. "
+                "Valid: function, method, class, interface, type_alias, enum, variable, constant. "
+                "Leave empty for all kinds."
+            ),
+        },
+        "max_results": {
+            "type": "integer",
+            "description": "Maximum results to return (default 15, max 50)",
+        },
+    },
+)
+def tool_search_symbols(
+    project: str,
+    query: str,
+    intent: str = "find",
+    kinds: str = "",
+    max_results: int = 15,
+) -> str:
+    try:
+        from compiler.search import find_symbols
+        from storage import get_project
+
+        p = get_project(project)
+        if not p:
+            from storage import load_projects
+            names = [x.get("name") for x in load_projects()]
+            return f"[error]: Project '{project}' not found. Available: {names or ['none']}"
+
+        kind_list = [k.strip() for k in kinds.split(",") if k.strip()] if kinds else None
+        limit = max(1, min(50, max_results))
+
+        results = find_symbols(
+            project_id=project,
+            query_text=query,
+            intent=intent,
+            kinds=kind_list,
+            max_results=limit,
+        )
+
+        if not results:
+            return f"No symbols found for '{query}' in project '{project}'."
+
+        lines = [f"Found {len(results)} result(s) for '{query}':"]
+        for r in results:
+            loc = f"{r.path}:{r.start_line}"
+            sig = f" — {r.signature}" if r.signature else ""
+            src_tags = "+".join(sorted(r.sources))
+            lines.append(
+                f"  [{r.kind}] {r.name}{sig}\n"
+                f"    {loc} (score={r.score:.3f}, via={src_tags})"
+            )
+            if r.summary:
+                lines.append(f"    summary: {r.summary}")
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        return f"[error]: search_symbols failed: {e}"
+
+
+@tool(
+    "graph_expand",
+    (
+        "Expand the knowledge graph from one or more known node IDs to discover "
+        "connected symbols. Use 'forward' to find what a symbol depends on (calls, imports), "
+        "or 'backward' (impact) to find everything that depends on it. "
+        "Combine with search_symbols: first find a node_id, then expand from it."
+    ),
+    {
+        "project": {
+            "type": "string",
+            "description": "Project name",
+        },
+        "node_ids": {
+            "type": "string",
+            "description": "Comma-separated node IDs to start from (from search_symbols results)",
+        },
+        "intent": {
+            "type": "string",
+            "description": (
+                "Traversal intent. "
+                "find: expand forward (what does this use?); "
+                "impact: expand backward (what uses this?)"
+            ),
+        },
+        "max_depth": {
+            "type": "integer",
+            "description": "Traversal depth (1 = direct neighbors, 3 = default, max 5)",
+        },
+    },
+)
+def tool_graph_expand(
+    project: str,
+    node_ids: str,
+    intent: str = "find",
+    max_depth: int = 3,
+) -> str:
+    try:
+        from compiler.search import expand_from
+        from storage import get_project
+
+        p = get_project(project)
+        if not p:
+            return f"[error]: Project '{project}' not found."
+
+        ids = [x.strip() for x in node_ids.split(",") if x.strip()]
+        if not ids:
+            return "[error]: node_ids must not be empty."
+
+        depth = max(1, min(5, max_depth))
+        results = expand_from(project, ids, intent=intent, max_depth=depth)
+
+        if not results:
+            return "No connected nodes found."
+
+        lines = [f"Graph expansion from {len(ids)} seed(s), depth={depth}:"]
+        for r in results:
+            loc = f"{r.path}:{r.start_line}"
+            sig = f" — {r.signature}" if r.signature else ""
+            lines.append(
+                f"  [{r.kind}] {r.name}{sig}\n"
+                f"    {loc} (score={r.score:.3f})"
+            )
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        return f"[error]: graph_expand failed: {e}"
+
+
 @tool("ssh", "Run a command on a remote machine via SSH", {
     "remote": {"type": "string", "description": "Remote name from settings (e.g. mac-mini) or user@host"},
     "command": {"type": "string", "description": "Shell command to run on the remote machine"},
