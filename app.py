@@ -485,6 +485,73 @@ async def read_project_file_route(name: str, request: Request):
     return {"content": read_project_file(p, data.get("path", ""))}
 
 
+# ── Compiler ──────────────────────────────────────────────────────────────────
+
+
+@app.post("/api/compiler/{name}/compile")
+async def compile_project_route(name: str):
+    """Trigger a full compilation pass for a project (scan → canonicalize → graph_build)."""
+    import asyncio
+    from compiler.pipeline import compile_project
+
+    p = get_project(name)
+    if not p:
+        raise HTTPException(status_code=404, detail="Project not found")
+    root = p.get("root", "")
+    if not root:
+        raise HTTPException(status_code=400, detail="Project has no root path")
+
+    result = await asyncio.to_thread(compile_project, name, root)
+    scan = result.scan
+    return {
+        "ok": True,
+        "project": name,
+        "scan": {
+            "discovered": scan.discovered if scan else 0,
+            "changed": scan.changed if scan else 0,
+            "removed": scan.removed if scan else 0,
+            "stable": scan.stable if scan else 0,
+            "skipped": scan.skipped if scan else 0,
+        } if scan else None,
+        "compiled": result.files_compiled,
+        "skipped_ir": result.files_skipped_ir,
+        "failed": result.files_failed,
+        "nodes": {
+            "created": result.nodes_created,
+            "updated": result.nodes_updated,
+            "removed": result.nodes_removed,
+        },
+        "edges_created": result.edges_created,
+        "errors": result.errors,
+    }
+
+
+@app.get("/api/compiler/{name}/nodes")
+async def get_project_nodes(name: str, kind: str = "", limit: int = 100):
+    """Query graph nodes for a project, optionally filtered by kind."""
+    from db import get_db
+
+    p = get_project(name)
+    if not p:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    with get_db() as conn:
+        if kind:
+            rows = conn.execute(
+                "SELECT id, path, kind, name, signature, start_line, end_line, language "
+                "FROM nodes WHERE project_id = ? AND kind = ? ORDER BY path, start_line LIMIT ?",
+                (name, kind, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT id, path, kind, name, signature, start_line, end_line, language "
+                "FROM nodes WHERE project_id = ? ORDER BY path, start_line LIMIT ?",
+                (name, limit),
+            ).fetchall()
+
+    return {"nodes": [dict(r) for r in rows], "count": len(rows)}
+
+
 # ── Browse ────────────────────────────────────────────────────────────────────
 
 
