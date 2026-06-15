@@ -452,7 +452,7 @@ async def run_agent_stream(
 
         # ── Stream the model response token-by-token ──────────────────────────
         raw = ""
-        in_think = False
+        was_thinking = False
         iter_tokens = 0
 
         try:
@@ -465,28 +465,18 @@ async def run_agent_stream(
                     data = json.loads(line)
                 except Exception:
                     continue
-                chunk = data.get("message", {}).get("content", "")
+                msg = data.get("message", {})
+                think_chunk = msg.get("thinking", "")
+                chunk = msg.get("content", "")
+                if think_chunk:
+                    was_thinking = True
+                    yield f"data: {json.dumps({'type': 'think_stream', 'content': think_chunk})}\n\n"
                 if chunk:
-                    raw += chunk
-                    if "<think>" in chunk:
-                        in_think = True
-                        before, _, after = chunk.partition("<think>")
-                        if before:
-                            yield f"data: {json.dumps({'type': 'agent_stream', 'content': before})}\n\n"
-                        if after:
-                            yield f"data: {json.dumps({'type': 'think_stream', 'content': after})}\n\n"
-                    elif "</think>" in chunk:
-                        in_think = False
-                        before, _, after = chunk.partition("</think>")
-                        if before:
-                            yield f"data: {json.dumps({'type': 'think_stream', 'content': before})}\n\n"
+                    if was_thinking:
+                        was_thinking = False
                         yield f"data: {json.dumps({'type': 'think_end'})}\n\n"
-                        if after:
-                            yield f"data: {json.dumps({'type': 'agent_stream', 'content': after})}\n\n"
-                    elif in_think:
-                        yield f"data: {json.dumps({'type': 'think_stream', 'content': chunk})}\n\n"
-                    else:
-                        yield f"data: {json.dumps({'type': 'agent_stream', 'content': chunk})}\n\n"
+                    raw += chunk
+                    yield f"data: {json.dumps({'type': 'agent_stream', 'content': chunk})}\n\n"
                 if data.get("done"):
                     iter_tokens = (
                         data.get("eval_count", 0) + data.get("prompt_eval_count", 0)
