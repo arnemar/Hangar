@@ -1,0 +1,24 @@
+{"query": "fts query tokenize prefix", "expected": [{"name": "_build_fts_query", "path": "compiler/fts.py", "kind": "function"}], "min_recall": 1}
+{"query": "find symbols text search project", "expected": [{"name": "find_symbols", "path": "compiler/search.py", "kind": "function"}], "min_recall": 1}
+{"query": "expand graph nodes traversal", "expected": [{"name": "graph_expand", "path": "compiler/graph.py", "kind": "function"}, {"name": "expand_from", "path": "compiler/search.py", "kind": "function"}], "min_recall": 1}
+{"query": "compile project pipeline phases", "expected": [{"name": "compile_project", "path": "compiler/pipeline.py", "kind": "function"}], "min_recall": 1}
+{"query": "score rank relevance intent", "expected": [{"name": "score", "path": "compiler/ranking.py", "kind": "function"}, {"name": "rank", "path": "compiler/ranking.py", "kind": "function"}], "min_recall": 1}
+{"query": "context block token budget build", "expected": [{"name": "ContextBlock", "path": "compiler/context_builder.py", "kind": "class"}, {"name": "build", "path": "compiler/context_builder.py", "kind": "function"}], "min_recall": 1}
+{"query": "node identifier hash project path kind", "expected": [{"name": "node_id", "path": "compiler/ir.py", "kind": "function"}], "min_recall": 1}
+{"query": "content hash source sha256", "expected": [{"name": "content_hash", "path": "compiler/ir.py", "kind": "function"}], "min_recall": 1}
+{"query": "canonicalize ir source language path", "expected": [{"name": "canonicalize", "path": "compiler/canonicalizer.py", "kind": "function"}], "min_recall": 1}
+{"query": "init database schema tables", "expected": [{"name": "init_db", "path": "db.py", "kind": "function"}], "min_recall": 1}
+{"query": "get database connection sqlite", "expected": [{"name": "get_db", "path": "db.py", "kind": "function"}], "min_recall": 1}
+{"query": "emit event project type payload", "expected": [{"name": "emit", "path": "compiler/events.py", "kind": "function"}], "min_recall": 1}
+{"query": "link resolve cross file edges", "expected": [{"name": "link", "path": "compiler/linker.py", "kind": "function"}], "min_recall": 1}
+{"query": "resolve edge raw ref symbol index", "expected": [{"name": "_resolve_edge", "path": "compiler/linker.py", "kind": "function"}], "min_recall": 1}
+{"query": "normalize ref path importer relative", "expected": [{"name": "_normalize_ref_path", "path": "compiler/linker.py", "kind": "function"}], "min_recall": 1}
+{"query": "scan filesystem discovery files walk", "expected": [{"name": "scan", "path": "compiler/discovery.py", "kind": "function"}], "min_recall": 1}
+{"query": "extract symbols ast source parse", "expected": [{"name": "extract", "path": "compiler/ast_extractor.py", "kind": "function"}], "min_recall": 1}
+{"query": "query context project intent budget", "expected": [{"name": "QueryContext", "path": "compiler/read_model.py", "kind": "class"}], "min_recall": 1}
+{"query": "search result node score sources", "expected": [{"name": "SearchResult", "path": "compiler/read_model.py", "kind": "class"}], "min_recall": 1}
+{"query": "record access hot symbol session", "expected": [{"name": "record_access", "path": "compiler/read_model.py", "kind": "function"}], "min_recall": 1}
+{"query": "build graph nodes edges ir file", "expected": [{"name": "build", "path": "compiler/graph_builder.py", "kind": "function"}], "min_recall": 1}
+{"query": "symbol context source full node", "expected": [{"name": "symbol_context", "path": "compiler/search.py", "kind": "function"}], "min_recall": 1}
+{"query": "pipeline result nodes created compiled", "expected": [{"name": "PipelineResult", "path": "compiler/pipeline.py", "kind": "class"}], "min_recall": 1}
+{"query": "rank input fan_in semantic score", "expected": [{"name": "RankInput", "path": "compiler/ranking.py", "kind": "class"}], "min_recall": 1}

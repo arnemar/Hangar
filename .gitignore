@@ -6,3 +6,5 @@ __pycache__/
 *.err
 data/
 .env
+tests/fixtures/*.db
+tests/fixtures/*.json
