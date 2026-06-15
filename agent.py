@@ -373,13 +373,13 @@ async def _stream_plan(
             chunk = msg.get("content", "")
             if think_chunk:
                 was_thinking = True
-                yield f"data: {json.dumps({'type': 'think_stream', 'content': think_chunk})}\n\n"
+                yield f"data: {json.dumps({'type': 'think_stream', 'content': think_chunk, 'model': planner_model})}\n\n"
             if chunk:
                 if was_thinking:
                     was_thinking = False
                     yield f"data: {json.dumps({'type': 'think_end'})}\n\n"
                 plan_buffer += chunk
-                yield f"data: {json.dumps({'type': 'plan_stream', 'content': chunk})}\n\n"
+                yield f"data: {json.dumps({'type': 'plan_stream', 'content': chunk, 'model': planner_model})}\n\n"
             if data.get("done"):
                 break
     except Exception:
@@ -486,7 +486,7 @@ async def run_agent_stream(
                 chunk = msg.get("content", "")
                 if think_chunk:
                     was_thinking = True
-                    yield f"data: {json.dumps({'type': 'think_stream', 'content': think_chunk})}\n\n"
+                    yield f"data: {json.dumps({'type': 'think_stream', 'content': think_chunk, 'model': model})}\n\n"
                 if chunk:
                     if was_thinking:
                         was_thinking = False

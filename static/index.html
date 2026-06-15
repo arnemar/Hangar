@@ -592,7 +592,11 @@ function Message({ msg }) {
         <div className="think-block">
           <div className="think-header" onClick={() => setOpen(o => !o)}>
             <span>💭</span>
-            <span style={{flex:1}}>{msg.streaming ? 'Thinking...' : 'Thought process'}</span>
+            <span style={{flex:1}}>
+              {msg.streaming ? 'Thinking' : 'Thought process'}
+              {msg.model && <span style={{color:'var(--text3)',marginLeft:6}}>· {msg.model}</span>}
+              {msg.streaming && '...'}
+            </span>
             {msg.streaming
               ? <div className="thinking-dots"><div className="thinking-dot"/><div className="thinking-dot"/><div className="thinking-dot"/></div>
               : <span style={{fontSize:10}}>{open ? '▲' : '▼'}</span>}
@@ -608,7 +612,8 @@ function Message({ msg }) {
       <div className="message assistant">
         <div className={`plan-msg${multiline ? ' plan-msg-block' : ''}`}>
           <span className="plan-label">
-            {msg.streaming ? 'planning' : (msg.model ? `plan · ${msg.model}` : 'plan')}
+            {msg.streaming ? 'planning' : 'plan'}
+            {msg.model && <span style={{fontWeight:400,marginLeft:4}}>· {msg.model}</span>}
             {msg.streaming && <span style={{display:'inline-flex',gap:3,marginLeft:6,verticalAlign:'middle'}}>
               <div className="thinking-dot"/><div className="thinking-dot"/><div className="thinking-dot"/>
             </span>}
@@ -820,7 +825,7 @@ function ChatView({ session, model, onRunning, stopRef, draftInput, setDraftInpu
                   thinkIdRef.current = tid;
                   setMessages(prev => {
                     const filtered = prev.filter(m => m.role !== 'thinking' && m.role !== 'status');
-                    return [...filtered, { id: tid, role: 'think_block', content: data.content, streaming: true }];
+                    return [...filtered, { id: tid, role: 'think_block', content: data.content, streaming: true, model: data.model }];
                   });
                 } else {
                   const tid = thinkIdRef.current;
