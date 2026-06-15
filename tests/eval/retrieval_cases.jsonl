@@ -4,7 +4,7 @@
 {"query": "compile project pipeline phases", "expected": [{"name": "compile_project", "path": "compiler/pipeline.py", "kind": "function"}], "min_recall": 1}
 {"query": "score rank relevance intent", "expected": [{"name": "score", "path": "compiler/ranking.py", "kind": "function"}, {"name": "rank", "path": "compiler/ranking.py", "kind": "function"}], "min_recall": 1}
 {"query": "context block token budget build", "expected": [{"name": "ContextBlock", "path": "compiler/context_builder.py", "kind": "class"}, {"name": "build", "path": "compiler/context_builder.py", "kind": "function"}], "min_recall": 1}
-{"query": "node identifier hash project path kind", "expected": [{"name": "node_id", "path": "compiler/ir.py", "kind": "function"}], "min_recall": 1}
+{"query": "node_id project_id path kind parent", "expected": [{"name": "node_id", "path": "compiler/ir.py", "kind": "function"}], "min_recall": 1}
 {"query": "content hash source sha256", "expected": [{"name": "content_hash", "path": "compiler/ir.py", "kind": "function"}], "min_recall": 1}
 {"query": "canonicalize ir source language path", "expected": [{"name": "canonicalize", "path": "compiler/canonicalizer.py", "kind": "function"}], "min_recall": 1}
 {"query": "init database schema tables", "expected": [{"name": "init_db", "path": "db.py", "kind": "function"}], "min_recall": 1}
