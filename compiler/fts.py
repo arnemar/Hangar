@@ -21,12 +21,18 @@ from db import get_db
 
 
 def _build_fts_query(raw: str) -> str:
-    """Sanitize user input → FTS5 MATCH expression with prefix matching."""
+    """Sanitize user input → FTS5 MATCH expression with prefix matching.
+
+    Uses OR semantics so that natural-language queries like "login authentication"
+    still find symbols whose name matches any token. AND would require all tokens
+    to appear in the same node record, which almost never happens for sparse
+    name/signature/summary content.
+    """
     tokens = re.sub(r'[^\w\s]', ' ', raw).split()
     valid = [t for t in tokens if len(t) >= 3]
     if not valid:
         return ""
-    return " ".join(f"{t}*" for t in valid)
+    return " OR ".join(f"{t}*" for t in valid)
 
 
 def fts_query(
