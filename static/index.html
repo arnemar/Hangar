@@ -620,7 +620,7 @@ function Message({ msg }) {
           </span>
           {multiline
             ? <pre style={{margin:0,fontFamily:'var(--font-mono)',fontSize:11,whiteSpace:'pre-wrap'}}>{msg.content}</pre>
-            : msg.content}
+            : <span>{msg.content}</span>}
         </div>
       </div>
     );
