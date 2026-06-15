@@ -397,7 +397,7 @@ class _TSExtractor:
         result: ASTResult,
     ) -> None:
         for child in root.children:
-            if child.type == "import_declaration":
+            if child.type in ("import_statement", "import_declaration"):
                 self._emit_import_edges(child, project_id, path, source_bytes, file_node_id, result)
             elif child.type == "expression_statement":
                 # require() calls
