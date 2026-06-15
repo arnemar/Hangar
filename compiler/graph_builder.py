@@ -169,6 +169,7 @@ def build(ir: IRFile) -> BuildResult:
 
         for nid in existing_nodes:
             if nid not in incoming_node_ids:
+                conn.execute("DELETE FROM edges WHERE from_id = ?", (nid,))
                 conn.execute("DELETE FROM nodes WHERE id = ?", (nid,))
                 existing = existing_nodes[nid]
                 node_events.append((

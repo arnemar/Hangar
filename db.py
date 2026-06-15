@@ -93,6 +93,22 @@ def init_db() -> None:
                 content=nodes, content_rowid=rowid
             );
 
+            -- FTS5 sync triggers (keep nodes_fts in sync with nodes automatically)
+            CREATE TRIGGER IF NOT EXISTS nodes_ai AFTER INSERT ON nodes BEGIN
+                INSERT INTO nodes_fts(rowid, name, signature, summary)
+                VALUES (new.rowid, new.name, new.signature, new.summary);
+            END;
+            CREATE TRIGGER IF NOT EXISTS nodes_ad AFTER DELETE ON nodes BEGIN
+                INSERT INTO nodes_fts(nodes_fts, rowid, name, signature, summary)
+                VALUES ('delete', old.rowid, old.name, old.signature, old.summary);
+            END;
+            CREATE TRIGGER IF NOT EXISTS nodes_au AFTER UPDATE ON nodes BEGIN
+                INSERT INTO nodes_fts(nodes_fts, rowid, name, signature, summary)
+                VALUES ('delete', old.rowid, old.name, old.signature, old.summary);
+                INSERT INTO nodes_fts(rowid, name, signature, summary)
+                VALUES (new.rowid, new.name, new.signature, new.summary);
+            END;
+
             -- ── Compiler: knowledge graph edges ───────────────────────────
             -- kind values: contains/calls/imports/inherits/implements/
             --   uses/reads/writes/creates/returns/throws/tests/references
@@ -193,3 +209,6 @@ def init_db() -> None:
                 unresolved_edges    INTEGER DEFAULT 0
             );
         """)
+        # Sync any nodes that existed before the triggers were created
+        conn.execute("INSERT INTO nodes_fts(nodes_fts) VALUES('rebuild')")
+        conn.commit()

@@ -163,11 +163,14 @@ def build(
             nodes_omitted += 1
             continue
 
-        # Decide level based on score and budget
+        # Decide level based on score and budget.
+        # Thresholds are calibrated against the max achievable score without
+        # embeddings (~0.25 FTS + 0.20 graph = 0.45). With embeddings active
+        # the top end rises to ~0.80, so L3 threshold naturally shifts.
         score = r.score
         section: str
 
-        if score >= 0.7 and budget >= 80:
+        if score >= 0.15 and budget >= 80:
             # Try L3 (full source)
             source = _fetch_source(r.node_id)
             if source:
@@ -189,7 +192,7 @@ def build(
                 sections.append(section)
                 continue
 
-        if score >= 0.4 and budget >= 30:
+        if score >= 0.04 and budget >= 30:
             candidate = _render_l2(r)
             cost = _tok(candidate)
             if cost <= budget:
