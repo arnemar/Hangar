@@ -480,6 +480,7 @@ async def run_agent_stream(
                         before, _, after = chunk.partition("</think>")
                         if before:
                             yield f"data: {json.dumps({'type': 'think_stream', 'content': before})}\n\n"
+                        yield f"data: {json.dumps({'type': 'think_end'})}\n\n"
                         if after:
                             yield f"data: {json.dumps({'type': 'agent_stream', 'content': after})}\n\n"
                     elif in_think:

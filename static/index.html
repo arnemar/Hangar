@@ -802,6 +802,10 @@ function ChatView({ session, model, onRunning, stopRef, draftInput, setDraftInpu
                   const tid = thinkIdRef.current;
                   setMessages(prev => prev.map(m => m.id === tid ? { ...m, content: m.content + data.content } : m));
                 }
+              } else if (data.type === 'think_end') {
+                const tid = thinkIdRef.current;
+                thinkIdRef.current = null;
+                if (tid) setMessages(prev => prev.map(m => m.id === tid ? { ...m, streaming: false } : m));
               } else if (data.type === 'thinking') {
                 // New iteration: mark think block done, clear streaming bubble, show spinner
                 const oldSid = streamIdRef.current;
