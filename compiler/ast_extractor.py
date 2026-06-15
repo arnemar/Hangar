@@ -427,18 +427,35 @@ class _TSExtractor:
         file_node_id: str,
         result: ASTResult,
     ) -> None:
+        # Find source string — tree-sitter-typescript may not expose it as a named field,
+        # so fall back to scanning for the last 'string' child.
         source_node = node.child_by_field_name("source")
+        if source_node is None:
+            for c in node.children:
+                if c.type == "string":
+                    source_node = c
         if not source_node:
             return
         module_ref = _text(source_node, source_bytes).strip("'\"` ")
-        # Named imports
+        # Find import clause — field name varies; find by node type.
         clause = node.child_by_field_name("import_clause")
+        if clause is None:
+            for c in node.children:
+                if c.type == "import_clause":
+                    clause = c
+                    break
         if clause:
             for child in clause.children:
                 if child.type == "named_imports":
                     for spec in child.children:
                         if spec.type == "import_specifier":
+                            # tree-sitter-typescript may not expose 'name' as a field;
+                            # fall back to first identifier child.
                             name_node = spec.child_by_field_name("name")
+                            if name_node is None:
+                                name_node = next(
+                                    (c for c in spec.children if c.type == "identifier"), None
+                                )
                             symbol_name = _text(name_node, source_bytes) if name_node else ""
                             raw = f"{module_ref}:{symbol_name}" if symbol_name else module_ref
                             result.edges.append(IREdge(
