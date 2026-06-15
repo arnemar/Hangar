@@ -33,14 +33,17 @@ def init_db() -> None:
             );
 
             -- ── Compiler: file tracking ────────────────────────────────────
+            -- Invariant: if hash unchanged, compiler MUST NOT emit IR changes.
+            -- Invariant: if last_ir_hash unchanged, graph builder MUST NOT emit node/edge events.
             CREATE TABLE IF NOT EXISTS file_snapshots (
-                id          TEXT PRIMARY KEY,
-                project_id  TEXT NOT NULL,
-                path        TEXT NOT NULL,
-                language    TEXT,
-                hash        TEXT NOT NULL,
-                size        INTEGER,
-                last_indexed TEXT,
+                id               TEXT PRIMARY KEY,
+                project_id       TEXT NOT NULL,
+                path             TEXT NOT NULL,
+                language         TEXT,
+                hash             TEXT NOT NULL,
+                last_ir_hash     TEXT,
+                size             INTEGER,
+                last_compiled_at TEXT,
                 UNIQUE(project_id, path)
             );
 
