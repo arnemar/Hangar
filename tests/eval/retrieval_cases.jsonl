@@ -18,7 +18,7 @@
 {"query": "query context project intent budget", "expected": [{"name": "QueryContext", "path": "compiler/read_model.py", "kind": "class"}], "min_recall": 1}
 {"query": "search result node score sources", "expected": [{"name": "SearchResult", "path": "compiler/read_model.py", "kind": "class"}], "min_recall": 1}
 {"query": "record access hot symbol session", "expected": [{"name": "record_access", "path": "compiler/read_model.py", "kind": "function"}], "min_recall": 1}
-{"query": "build graph nodes edges ir file", "expected": [{"name": "build", "path": "compiler/graph_builder.py", "kind": "function"}], "min_recall": 1}
+{"query": "build IRFile BuildResult", "expected": [{"name": "build", "path": "compiler/graph_builder.py", "kind": "function"}], "min_recall": 1}
 {"query": "symbol context source full node", "expected": [{"name": "symbol_context", "path": "compiler/search.py", "kind": "function"}], "min_recall": 1}
 {"query": "pipeline result nodes created compiled", "expected": [{"name": "PipelineResult", "path": "compiler/pipeline.py", "kind": "class"}], "min_recall": 1}
 {"query": "rank input fan_in semantic score", "expected": [{"name": "RankInput", "path": "compiler/ranking.py", "kind": "class"}], "min_recall": 1}
