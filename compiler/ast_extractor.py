@@ -34,7 +34,7 @@ try:
 except ImportError:
     _TREE_SITTER_AVAILABLE = False
 
-from compiler.ir import IRNode, IREdge, node_id, content_hash
+from compiler.ir import IRNode, IREdge, node_id, file_id, content_hash
 
 
 # ── Output type ───────────────────────────────────────────────────────────────
@@ -144,24 +144,10 @@ class _TSExtractor:
         now = _now()
 
         result = ASTResult()
-        file_node_id = node_id(project_id, path, "file", path.split("/")[-1])
-
-        # File node
-        file_ir = IRNode(
-            id=file_node_id,
-            kind="file",
-            name=path.split("/")[-1],
-            path=path,
-            project_id=project_id,
-            parent_id=None,
-            signature="",
-            source="",
-            start_line=1,
-            end_line=source.count("\n") + 1,
-            language=language,
-            visibility="public",
-        )
-        result.nodes.append(file_ir)
+        # Use file_id() — same formula as canonicalizer's _inject_file_node.
+        # The file node itself is created by the canonicalizer; we only need
+        # the ID here for edge from_id references.
+        file_node_id = file_id(project_id, path)
 
         # Walk top-level children
         root = tree.root_node
@@ -370,9 +356,12 @@ class _TSExtractor:
                 if not name_node:
                     continue
                 name = _text(name_node, source_bytes)
-                # If the value is an arrow function, treat as function
                 value = child.child_by_field_name("value")
                 kind = "function" if value and value.type in ("arrow_function", "function") else "variable"
+                # Skip unexported local variables inside method/function bodies —
+                # they pollute the graph without aiding navigation.
+                if kind == "variable" and not is_exported:
+                    return None
                 start, end = _line(node)
                 return IRNode(
                     id=node_id(project_id, path, kind, name, parent_name),
