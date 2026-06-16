@@ -20,6 +20,22 @@ import re
 from db import get_db
 
 
+_STOP_WORDS = frozenset({
+    "the", "and", "for", "are", "but", "not", "you", "all", "can", "has", "had",
+    "her", "was", "one", "our", "out", "day", "get", "his", "how", "its", "now",
+    "put", "say", "she", "too", "use", "any", "may", "did", "let",
+    # question/instruction words that appear in natural-language queries but not code
+    "what", "where", "when", "which", "who", "whom", "why", "this", "that",
+    "there", "here", "then", "them", "they", "than", "also", "from", "into",
+    "with", "have", "been", "does", "give", "show", "tell", "help", "want",
+    "need", "make", "look", "find", "just", "more", "some", "like", "about",
+    "would", "could", "should", "will", "your", "their", "mine", "ours",
+    # words common in English prose but not in code identifiers
+    "implemented", "implementation", "currently", "basically", "functionality",
+    "something", "anything", "everything", "nothing",
+})
+
+
 def _build_fts_query(raw: str) -> str:
     """Sanitize user input → FTS5 MATCH expression with prefix matching.
 
@@ -27,9 +43,13 @@ def _build_fts_query(raw: str) -> str:
     still find symbols whose name matches any token. AND would require all tokens
     to appear in the same node record, which almost never happens for sparse
     name/signature/summary content.
+
+    Stop words (question words, prose connectors) are stripped so that queries
+    like "where is authentication implemented" don't pollute results with
+    high-frequency prose matches.
     """
-    tokens = re.sub(r'[^\w\s]', ' ', raw).split()
-    valid = [t for t in tokens if len(t) >= 3]
+    tokens = re.sub(r'[^\w\s]', ' ', raw).lower().split()
+    valid = [t for t in tokens if len(t) >= 3 and t not in _STOP_WORDS]
     if not valid:
         return ""
     return " OR ".join(f"{t}*" for t in valid)
