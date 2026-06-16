@@ -52,7 +52,19 @@ def _build_fts_query(raw: str) -> str:
     valid = [t for t in tokens if len(t) >= 3 and t not in _STOP_WORDS]
     if not valid:
         return ""
-    return " OR ".join(f"{t}*" for t in valid)
+    parts: list[str] = []
+    for t in valid:
+        parts.append(f"{t}*")
+        # For long tokens, also emit a 4-char prefix so "authentication*" also
+        # matches "authmanager" (FTS5 tokenizes CamelCase as a single lowercase token).
+        if len(t) >= 8:
+            short = t[:4]
+            if short not in _STOP_WORDS:
+                parts.append(f"{short}*")
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    unique = [p for p in parts if not (p in seen or seen.add(p))]  # type: ignore[func-returns-value]
+    return " OR ".join(unique)
 
 
 def fts_query(
