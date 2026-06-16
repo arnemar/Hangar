@@ -126,6 +126,7 @@ class ChatRequest(BaseModel):
     session_id: str
     message: str
     model: Optional[str] = None
+    project_id: Optional[str] = None
 
 
 @app.post("/api/chat")
@@ -153,6 +154,15 @@ async def chat(req: ChatRequest):
     if memory["facts"]:
         facts = "\n".join(f"- {f['content']}" for f in memory["facts"])
         parts.append(f"\nThings you know about the user:\n{facts}")
+
+    if req.project_id:
+        try:
+            from compiler.context_builder import build_for_query
+            ctx = build_for_query(req.project_id, req.message, session_id=req.session_id)
+            if ctx.text:
+                parts.append(ctx.text)
+        except Exception as _ctx_err:
+            parts.append(f"[context retrieval failed: {_ctx_err}]")
 
     messages = [{"role": "system", "content": "\n".join(parts)}]
     for row in rows:
