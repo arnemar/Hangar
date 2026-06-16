@@ -246,7 +246,7 @@ def link(project_id: str, min_confidence: float = 0.4) -> LinkResult:
     if resolve_events:
         emit_many(project_id, resolve_events)
 
-    # Update project_state.unresolved_edges
+    # Update project_state.unresolved_edges + recompute fan_in
     with get_db() as conn:
         still_unresolved = conn.execute(
             """SELECT COUNT(*) FROM edges e
@@ -257,6 +257,16 @@ def link(project_id: str, min_confidence: float = 0.4) -> LinkResult:
         conn.execute(
             "UPDATE project_state SET unresolved_edges = ? WHERE project_id = ?",
             (still_unresolved, project_id),
+        )
+        # Recompute fan_in = count of resolved calls/imports edges pointing TO each node
+        conn.execute(
+            """UPDATE nodes SET fan_in = (
+                SELECT COUNT(*) FROM edges
+                WHERE edges.to_id = nodes.id
+                  AND edges.resolved = 1
+                  AND edges.kind IN ('calls', 'imports')
+            ) WHERE project_id = ?""",
+            (project_id,),
         )
 
     logger.info(
