@@ -127,6 +127,7 @@ class ChatRequest(BaseModel):
     message: str
     model: Optional[str] = None
     project_id: Optional[str] = None
+    intent: Optional[str] = None      # find | orient | explain | edit | impact | debug
 
 
 @app.post("/api/chat")
@@ -158,7 +159,13 @@ async def chat(req: ChatRequest):
     if req.project_id:
         try:
             from compiler.context_builder import build_for_query
-            ctx = build_for_query(req.project_id, req.message, session_id=req.session_id)
+            ctx = build_for_query(
+                req.project_id,
+                req.message,
+                intent=req.intent or "find",
+                session_id=req.session_id,
+                token_budget=1500,
+            )
             if ctx.text:
                 parts.append(ctx.text)
         except Exception as _ctx_err:

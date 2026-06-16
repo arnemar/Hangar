@@ -23,6 +23,7 @@ Different query intents shift the effective balance:
   "edit"    — boost importance (high fan_in = risky to change)
   "debug"   — boost recency (hot symbols + recently changed)
   "explain" — boost fts (name/signature match matters most)
+  "orient"  — boost importance/fan_in heavily; surface core modules over scripts
 
 Importance normalization
 ------------------------
@@ -49,6 +50,7 @@ _INTENT_MODIFIERS: dict[str, dict[str, float]] = {
     "edit":    {"w_importance": 0.25, "w_fts": 0.15},
     "debug":   {"w_hot": 0.20, "w_fts": 0.20, "w_importance": 0.05},
     "explain": {"w_fts": 0.40, "w_semantic": 0.20},
+    "orient":  {"w_importance": 0.45, "w_fts": 0.10, "w_graph": 0.10},
 }
 
 
