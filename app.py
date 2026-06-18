@@ -125,20 +125,9 @@ async def delete_session(session_id: str):
 
 
 from compiler.intent import infer_intent as _infer_intent
+from search_pipeline import SearchPolicy, fetch_evidence
 
-_LIVE_DATA_SIGNALS = {
-    "current ", "right now", "today", "tonight", "this week", "this month",
-    "latest ", "recent ", "news", "weather", "score", "standings",
-    "price", "prijs", "koers", "rate", "stock", "crypto", "bitcoin",
-    "ethereum", "dollar", "euro", "search for", "look up", "find online",
-    "what happened", "who won", "when is ", "what time",
-}
-
-
-def _needs_web_search(message: str) -> bool:
-    """Heuristic: does this query likely need live/current data from the web?"""
-    m = message.lower()
-    return any(sig in m for sig in _LIVE_DATA_SIGNALS)
+_search_policy = SearchPolicy()
 
 
 # ── Chat ──────────────────────────────────────────────────────────────────────
@@ -207,15 +196,23 @@ async def chat(req: ChatRequest):
             (now, title, req.session_id),
         )
 
-    tool_schemas = get_tool_schemas(caps)
-    # Only pass tool schemas if the model supports native Ollama tool calling.
-    # For chat mode also gate on a live-data heuristic — models like mistral-nemo
-    # search reflexively when given tools, so we only expose them when the query
-    # actually needs current information.
-    _supports_tools = await model_supports_tools(model, ollama_url)
     _is_chat = req.mode != "workspace"
-    _give_tools = _supports_tools and (not _is_chat or _needs_web_search(req.message))
-    active_tools = tool_schemas if _give_tools else []
+
+    if _is_chat:
+        # Chat: runtime owns retrieval — model never sees search tools
+        decision = _search_policy.evaluate(req.message)
+        if decision.answer_style:
+            system_prompt = decision.answer_style + "\n\n" + system_prompt
+        evidence = await fetch_evidence(decision, req.message, req.session_id)
+        if evidence:
+            system_prompt += f"\n\n{evidence}"
+        messages[0] = {"role": "system", "content": system_prompt}
+        active_tools = []
+    else:
+        # Workspace: model-driven tool calling
+        tool_schemas = get_tool_schemas(caps)
+        _supports_tools = await model_supports_tools(model, ollama_url)
+        active_tools = tool_schemas if _supports_tools else []
 
     async def generate():
         full = ""
@@ -226,10 +223,14 @@ async def chat(req: ChatRequest):
             tool_calls_received = None
             turn_content = ""
 
+            # On the last iteration strip tools — forces the model to answer
+            # instead of making yet another tool call.
+            iteration_tools = [] if _iteration == policy.max_tool_calls else active_tools
+
             try:
                 async for line in stream_ollama(
                     current_messages, model,
-                    tools=active_tools,
+                    tools=iteration_tools,
                     num_ctx=num_ctx, ollama_url=ollama_url,
                 ):
                     try:
