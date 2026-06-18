@@ -20,6 +20,15 @@ IMPORTANCE_RECALCULATED
                     fan_in/fan_out/importance scores updated
 COMPILATION_STARTED
 COMPILATION_COMPLETED
+RETRIEVAL_TRACE     one record per query() call — for debugging, weight tuning,
+                    and future automatic optimization
+                    payload: {
+                      query, intent, session_id,
+                      retrieved: [{name, kind, path, score, sources}],
+                      source_counts: {fts, graph, hot},
+                      result_count, budget, budget_ratio,
+                      confidence, latency_ms
+                    }
 """
 
 from __future__ import annotations

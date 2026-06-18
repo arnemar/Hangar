@@ -41,10 +41,35 @@ _executor = ThreadPoolExecutor(max_workers=6, thread_name_prefix="tool-worker")
 TOOLS: dict = {}
 
 
-def tool(name: str, description: str, params: dict):
+from dataclasses import dataclass as _dc, field as _field
+from typing import Literal as _Lit
+
+
+@_dc
+class ToolMetadata:
+    """Declares the semantic effect of a tool on Plan state.
+
+    Checked by Plan.advance() — no hard-coded inference in plan.py.
+    """
+    affects_working_set: bool = True
+    working_set_reason: _Lit["retrieved", "edited", "dependency", "hypothesis"] = "retrieved"
+    contributes_evidence: bool = False   # tool output can serve as investigation evidence
+    contributes_hypothesis: bool = False # tool output can generate hypotheses
+
+
+# Shorthand presets used in @tool() calls below
+_WS_EVIDENCE = ToolMetadata(affects_working_set=False, contributes_evidence=True)
+_WS_NONE     = ToolMetadata(affects_working_set=False)
+_WS_EDITED   = ToolMetadata(working_set_reason="edited")
+_WS_DEP      = ToolMetadata(working_set_reason="dependency")
+_WS_DEFAULT  = ToolMetadata()  # retrieved, affects_working_set=True
+
+
+def tool(name: str, description: str, params: dict, *, meta: ToolMetadata | None = None):
     def decorator(fn):
         TOOLS[name] = {
             "function": fn,
+            "meta": meta or _WS_DEFAULT,
             "schema": {
                 "type": "function",
                 "function": {
@@ -62,7 +87,7 @@ def tool(name: str, description: str, params: dict):
     return decorator
 
 
-READ_ONLY_TOOLS = {"web_search", "read_file", "list_dir", "http_request", "git", "ssh"}
+READ_ONLY_TOOLS = {"web_search", "browse_page", "read_file", "list_dir", "http_request", "git", "ssh"}
 
 
 def get_tool_schemas(mode: str = "agent") -> list:
@@ -176,7 +201,7 @@ def _ssh_worker(remote: str, command: str, path: str) -> str:
 
 @tool("shell", "Execute a shell command and return the output", {
     "command": {"type": "string", "description": "The shell command to execute"},
-})
+}, meta=_WS_EVIDENCE)
 async def tool_shell(command: str) -> str:
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(_executor, _shell_worker, command)
@@ -201,44 +226,360 @@ def tool_read_file(path: str) -> str:
     "path": {"type": "string", "description": "Path to write to"},
     "content": {"type": "string", "description": "Content to write"},
     "mode": {"type": "string", "description": "Write mode: 'overwrite' or 'append'"},
-})
-def tool_write_file(path: str, content: str, mode: str = "overwrite") -> str:
+}, meta=_WS_EDITED)
+def tool_write_file(path: str, content: str, mode: str = "overwrite", project_id: str = "") -> str:
+    import json as _json
     try:
         p = _expand_path(path)
+        original = p.read_text(encoding="utf-8", errors="replace") if p.exists() else None
         p.parent.mkdir(parents=True, exist_ok=True)
         if mode == "append":
             with open(p, "a", encoding="utf-8") as f:
                 f.write(content)
         else:
             p.write_text(content, encoding="utf-8")
-        return f"[ok]: Written to {p}"
+
+        # Syntax check for Python files
+        if p.suffix == ".py":
+            import py_compile, tempfile
+            try:
+                with tempfile.NamedTemporaryFile(suffix=".py", delete=False, mode="w", encoding="utf-8") as tmp:
+                    tmp.write(p.read_text(encoding="utf-8"))
+                    tmp_path = tmp.name
+                py_compile.compile(tmp_path, doraise=True)
+                Path(tmp_path).unlink(missing_ok=True)
+            except py_compile.PyCompileError as e:
+                # Rollback
+                if original is not None:
+                    p.write_text(original, encoding="utf-8")
+                else:
+                    p.unlink(missing_ok=True)
+                return _json.dumps({"success": False, "syntax_ok": False,
+                                    "rollback_performed": True, "diagnostics": [f"SyntaxError: {e}", "File restored."]})
+
+        return _json.dumps({"success": True, "syntax_ok": True, "diagnostics": [f"Written to {p}"]})
     except Exception as e:
-        return f"[error]: {e}"
+        return _json.dumps({"success": False, "diagnostics": [str(e)]})
 
 
-@tool("edit_file", "Find and replace text in a file", {
-    "path": {"type": "string", "description": "Path to the file to edit"},
-    "old_text": {"type": "string", "description": "Exact text to find"},
-    "new_text": {"type": "string", "description": "Replacement text"},
-})
-def tool_edit_file(path: str, old_text: str, new_text: str) -> str:
+# ── Batch transaction state ───────────────────────────────────────────────────
+# Maps tx_id → {abs_path_str: original_content}.  Lives for the process lifetime.
+_transactions: dict[str, dict[str, str]] = {}
+
+
+@tool(
+    "begin_transaction",
+    "Start a batch edit transaction. Returns a tx_id. Pass it to edit_file calls to "
+    "stage edits without per-edit verification. Call commit_transaction when done to "
+    "verify all staged edits atomically and recompile, or rollback_transaction to undo.",
+    {},
+    meta=_WS_NONE,
+)
+def tool_begin_transaction() -> str:
+    import uuid
+    tx_id = str(uuid.uuid4())[:8]
+    _transactions[tx_id] = {}
+    return json.dumps({"tx_id": tx_id, "diagnostics": ["Transaction started. Pass tx_id to edit_file calls."]})
+
+
+@tool(
+    "commit_transaction",
+    "Verify and commit all staged edits in a transaction. Runs syntax checks and "
+    "incremental graph recompile for every changed file. Rolls back ALL files on "
+    "any failure so the codebase stays consistent.",
+    {
+        "tx_id": {"type": "string", "description": "Transaction ID from begin_transaction"},
+        "project_id": {"type": "string", "description": "Project name for graph recompilation (optional)"},
+    },
+    meta=_WS_NONE,
+)
+def tool_commit_transaction(tx_id: str, project_id: str = "") -> str:
+    if tx_id not in _transactions:
+        return json.dumps({"success": False, "diagnostics": [f"Transaction '{tx_id}' not found or already closed"]})
+
+    tx = _transactions[tx_id]
+    if not tx:
+        del _transactions[tx_id]
+        return json.dumps({"success": True, "files_committed": 0, "diagnostics": ["Empty transaction — nothing to commit"]})
+
+    diagnostics: list[str] = []
+    syntax_ok = True
+
+    # ── Phase 1: syntax check all changed .py files ───────────────────────────
+    import py_compile, tempfile
+    for abs_path in tx:
+        p = Path(abs_path)
+        if p.suffix.lower() == ".py":
+            try:
+                current = p.read_text(encoding="utf-8", errors="replace")
+                with tempfile.NamedTemporaryFile(suffix=".py", delete=False, mode="w", encoding="utf-8") as tmp:
+                    tmp.write(current)
+                    tmp_path = tmp.name
+                py_compile.compile(tmp_path, doraise=True)
+                Path(tmp_path).unlink(missing_ok=True)
+            except py_compile.PyCompileError as e:
+                syntax_ok = False
+                diagnostics.append(f"{p.name}: SyntaxError: {e}")
+
+    # ── Rollback all on syntax failure ────────────────────────────────────────
+    if not syntax_ok:
+        for abs_path, original in tx.items():
+            Path(abs_path).write_text(original, encoding="utf-8")
+        del _transactions[tx_id]
+        diagnostics.append(f"All {len(tx)} file(s) restored to original.")
+        return json.dumps({"success": False, "syntax_ok": False, "rollback_performed": True,
+                           "files_committed": 0, "diagnostics": diagnostics})
+
+    # ── Phase 2: graph recompile each changed file ────────────────────────────
+    compile_ok = True
+    total_nodes = 0
+    total_edges = 0
+
+    if project_id:
+        from storage import get_project
+        from compiler.pipeline import compile_file
+        proj = get_project(project_id)
+        if proj:
+            root = proj.get("root", "")
+            for abs_path in tx:
+                p = Path(abs_path)
+                try:
+                    rel = str(p.relative_to(Path(root).resolve()))
+                    cr = compile_file(project_id, root, rel, check_health=False)
+                    total_nodes += cr.nodes_created + cr.nodes_updated
+                    total_edges += cr.edges_created
+                    if cr.errors:
+                        compile_ok = False
+                        diagnostics.extend([f"{p.name}: {e}" for e in cr.errors[:2]])
+                except Exception as ce:
+                    diagnostics.append(f"{p.name}: compile skipped: {ce}")
+
+    if not compile_ok:
+        for abs_path, original in tx.items():
+            Path(abs_path).write_text(original, encoding="utf-8")
+        del _transactions[tx_id]
+        diagnostics.append(f"All {len(tx)} file(s) restored to original.")
+        return json.dumps({"success": False, "compile_ok": False, "rollback_performed": True,
+                           "files_committed": 0, "diagnostics": diagnostics})
+
+    files_committed = len(tx)
+    del _transactions[tx_id]
+    return json.dumps({
+        "success": True,
+        "files_committed": files_committed,
+        "changed_nodes": total_nodes,
+        "changed_edges": total_edges,
+        "diagnostics": diagnostics or [f"{files_committed} file(s) committed and verified."],
+    })
+
+
+@tool(
+    "rollback_transaction",
+    "Restore all files staged in a transaction to their original content and discard the transaction.",
+    {
+        "tx_id": {"type": "string", "description": "Transaction ID from begin_transaction"},
+    },
+    meta=_WS_NONE,
+)
+def tool_rollback_transaction(tx_id: str) -> str:
+    if tx_id not in _transactions:
+        return json.dumps({"success": False, "diagnostics": [f"Transaction '{tx_id}' not found or already closed"]})
+    tx = _transactions.pop(tx_id)
+    for abs_path, original in tx.items():
+        Path(abs_path).write_text(original, encoding="utf-8")
+    return json.dumps({
+        "success": True,
+        "files_restored": len(tx),
+        "diagnostics": [f"{len(tx)} file(s) restored."],
+    })
+
+
+@tool(
+    "edit_file",
+    (
+        "Find and replace text in a file. Verifies syntax, recompiles the graph, and "
+        "rolls back on failure. Pass tx_id from begin_transaction to stage edits for "
+        "atomic multi-file commits. Use verification='full' to also run graph consistency checks."
+    ),
+    {
+        "path": {"type": "string", "description": "Path to the file to edit"},
+        "old_text": {"type": "string", "description": "Exact text to find (whitespace must match exactly)"},
+        "new_text": {"type": "string", "description": "Replacement text"},
+        "project_id": {"type": "string", "description": "Project name for graph recompilation (optional)"},
+        "verification": {
+            "type": "string",
+            "description": (
+                "Verification level: "
+                "'syntax' (default) — syntax check only; "
+                "'graph' — syntax + incremental graph recompile; "
+                "'full' — graph + consistency checks (dangling edges, FTS parity)"
+            ),
+        },
+        "transaction_id": {
+            "type": "string",
+            "description": (
+                "Optional tx_id from begin_transaction. When set, the edit is staged "
+                "in the transaction without per-edit verification — call commit_transaction "
+                "to verify and finalize all staged edits atomically."
+            ),
+        },
+    },
+    meta=_WS_EDITED,
+)
+def tool_edit_file(
+    path: str,
+    old_text: str,
+    new_text: str,
+    project_id: str = "",
+    verification: str = "syntax",
+    transaction_id: str = "",
+) -> str:
+    import json as _json
     try:
         p = _expand_path(path)
         if not p.exists():
-            return f"[error]: File not found: {path}"
-        content = p.read_text(errors="replace")
-        if old_text not in content:
-            return "[error]: Text not found in file"
-        count = content.count(old_text)
-        p.write_text(content.replace(old_text, new_text), encoding="utf-8")
-        return f"[ok]: Replaced {count} occurrence(s) in {p}"
+            return _json.dumps({"success": False, "diagnostics": [f"File not found: {path}"]})
+        original = p.read_text(encoding="utf-8", errors="replace")
+        if old_text not in original:
+            return _json.dumps({"success": False, "diagnostics": ["Text not found in file — check exact whitespace and indentation"]})
+
+        count = original.count(old_text)
+        updated = original.replace(old_text, new_text)
+
+        # ── Transaction staging (no immediate verification) ────────────────────
+        if transaction_id:
+            if transaction_id not in _transactions:
+                return _json.dumps({"success": False, "diagnostics": [f"Transaction '{transaction_id}' not found"]})
+            abs_str = str(p)
+            # Store the ORIGINAL content (first write wins — preserves pre-tx state)
+            if abs_str not in _transactions[transaction_id]:
+                _transactions[transaction_id][abs_str] = original
+            p.write_text(updated, encoding="utf-8")
+            return _json.dumps({
+                "success": True,
+                "staged": True,
+                "transaction_id": transaction_id,
+                "occurrences_replaced": count,
+                "diagnostics": [f"Staged in transaction {transaction_id}. Call commit_transaction to finalize."],
+            })
+
+        # ── Atomic backup (written before any mutation) ───────────────────────
+        tmp_path = p.with_name(p.name + ".hangar_tmp")
+        tmp_path.write_text(original, encoding="utf-8")
+
+        try:
+            p.write_text(updated, encoding="utf-8")
+
+            diagnostics: list[str] = []
+            syntax_ok = True
+            compile_ok = True
+            changed_nodes = 0
+            changed_edges = 0
+            added_names: list[str] = []
+            removed_names: list[str] = []
+            graph_health: dict = {}
+
+            # ── Syntax check ─────────────────────────────────────────────────
+            if p.suffix.lower() == ".py":
+                import py_compile, tempfile
+                try:
+                    with tempfile.NamedTemporaryFile(suffix=".py", delete=False, mode="w", encoding="utf-8") as tmp:
+                        tmp.write(updated)
+                        check_tmp = tmp.name
+                    py_compile.compile(check_tmp, doraise=True)
+                    Path(check_tmp).unlink(missing_ok=True)
+                except py_compile.PyCompileError as e:
+                    syntax_ok = False
+                    diagnostics.append(f"SyntaxError: {e}")
+
+            # ── Graph recompilation (graph / full) ────────────────────────────
+            if syntax_ok and project_id and verification in ("graph", "full"):
+                try:
+                    from storage import get_project
+                    proj = get_project(project_id)
+                    if proj:
+                        root = proj.get("root", "")
+                        rel = str(p.resolve().relative_to(Path(root).resolve()))
+                        from compiler.pipeline import compile_file
+                        cr = compile_file(
+                            project_id, root, rel,
+                            check_health=(verification == "full"),
+                        )
+                        changed_nodes = cr.nodes_created + cr.nodes_updated
+                        changed_edges = cr.edges_created
+                        added_names = cr.added_names
+                        removed_names = cr.removed_names
+                        graph_health = cr.graph_health
+                        if cr.errors:
+                            compile_ok = False
+                            diagnostics.extend(cr.errors[:3])
+                except Exception as ce:
+                    diagnostics.append(f"Graph recompile skipped: {ce}")
+            elif syntax_ok and project_id and verification == "syntax":
+                # Still do graph recompile to keep graph current, but don't gate on it
+                try:
+                    from storage import get_project
+                    proj = get_project(project_id)
+                    if proj:
+                        root = proj.get("root", "")
+                        rel = str(p.resolve().relative_to(Path(root).resolve()))
+                        from compiler.pipeline import compile_file
+                        cr = compile_file(project_id, root, rel)
+                        changed_nodes = cr.nodes_created + cr.nodes_updated
+                        changed_edges = cr.edges_created
+                        added_names = cr.added_names
+                        removed_names = cr.removed_names
+                except Exception:
+                    pass  # best-effort for syntax-level verification
+
+            # ── Rollback if verification failed ───────────────────────────────
+            if not syntax_ok or not compile_ok:
+                shutil.copy2(str(tmp_path), str(p))
+                tmp_path.unlink(missing_ok=True)
+                diagnostics.append("File restored from backup.")
+                return _json.dumps({
+                    "success": False,
+                    "syntax_ok": syntax_ok,
+                    "compile_ok": compile_ok,
+                    "rollback_performed": True,
+                    "changed_nodes": 0,
+                    "changed_edges": 0,
+                    "diagnostics": diagnostics,
+                })
+
+            tmp_path.unlink(missing_ok=True)
+            result = {
+                "success": True,
+                "syntax_ok": True,
+                "compile_ok": True,
+                "rollback_performed": False,
+                "occurrences_replaced": count,
+                "changed_nodes": changed_nodes,
+                "changed_edges": changed_edges,
+                "diagnostics": diagnostics or ["Edit applied and verified."],
+            }
+            if added_names:
+                result["added_symbols"] = added_names
+            if removed_names:
+                result["removed_symbols"] = removed_names
+            if graph_health:
+                result["graph_health"] = graph_health
+            return _json.dumps(result)
+
+        except Exception:
+            # Ensure backup is always restored on unexpected error
+            if tmp_path.exists():
+                shutil.copy2(str(tmp_path), str(p))
+                tmp_path.unlink(missing_ok=True)
+            raise
+
     except Exception as e:
-        return f"[error]: {e}"
+        return _json.dumps({"success": False, "diagnostics": [str(e)]})
 
 
 @tool("list_dir", "List files and directories at a path", {
     "path": {"type": "string", "description": "Directory path to list, defaults to home directory"},
-})
+}, meta=_WS_NONE)
 def tool_list_dir(path: str = "~") -> str:
     try:
         p = _expand_path(path)
@@ -260,24 +601,73 @@ def tool_list_dir(path: str = "~") -> str:
         return f"[error]: {e}"
 
 
-@tool("web_search", "Search the web using DuckDuckGo", {
+@tool("web_search", "Search the web using DuckDuckGo. Returns real search results with titles, URLs, and snippets.", {
     "query": {"type": "string", "description": "Search query"},
-})
-async def tool_web_search(query: str) -> str:
+    "max_results": {"type": "integer", "description": "Number of results to return (default 6, max 15)"},
+}, meta=_WS_EVIDENCE)
+async def tool_web_search(query: str, max_results: int = 6) -> str:
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.get(
-                "https://api.duckduckgo.com/",
-                params={"q": query, "format": "json", "no_html": 1, "skip_disambig": 1},
-            )
-            data = r.json()
-            results = []
-            if data.get("AbstractText"):
-                results.append(f"Summary: {data['AbstractText']}")
-            for topic in data.get("RelatedTopics", [])[:5]:
-                if isinstance(topic, dict) and topic.get("Text"):
-                    results.append(f"- {topic['Text']}")
-            return "\n".join(results) if results else f"No results found for: {query}"
+        from duckduckgo_search import DDGS
+        limit = max(1, min(15, max_results))
+        loop = asyncio.get_running_loop()
+
+        def _search():
+            with DDGS() as ddgs:
+                return list(ddgs.text(query, max_results=limit))
+
+        results = await loop.run_in_executor(_executor, _search)
+        if not results:
+            return f"No results found for: {query}"
+        lines = [f"Search results for: {query}\n"]
+        for i, r in enumerate(results, 1):
+            lines.append(f"{i}. {r.get('title', '(no title)')}")
+            lines.append(f"   URL: {r.get('href', '')}")
+            lines.append(f"   {r.get('body', '')[:200]}")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"[error]: {e}"
+
+
+@tool(
+    "browse_page",
+    "Fetch a web page and return its main readable content, stripping ads, navigation, and boilerplate. "
+    "Use after web_search to read the full content of a result.",
+    {
+        "url": {"type": "string", "description": "Full URL to fetch"},
+        "max_chars": {"type": "integer", "description": "Max characters to return (default 4000)"},
+    },
+    meta=_WS_EVIDENCE,
+)
+async def tool_browse_page(url: str, max_chars: int = 4000) -> str:
+    try:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True,
+                                     headers={"User-Agent": "Mozilla/5.0 (compatible; HangarBot/1.0)"}) as client:
+            r = await client.get(url)
+            r.raise_for_status()
+            html = r.text
+
+        loop = asyncio.get_running_loop()
+
+        def _extract():
+            try:
+                import trafilatura
+                text = trafilatura.extract(html, include_links=False, include_images=False,
+                                           no_fallback=False, favor_recall=True)
+                return text or ""
+            except Exception:
+                # Fallback: strip tags manually
+                import re
+                text = re.sub(r"<style[^>]*>.*?</style>", "", html, flags=re.DOTALL)
+                text = re.sub(r"<script[^>]*>.*?</script>", "", text, flags=re.DOTALL)
+                text = re.sub(r"<[^>]+>", " ", text)
+                text = re.sub(r"\s+", " ", text)
+                return text.strip()
+
+        content = await loop.run_in_executor(_executor, _extract)
+        limit = max(500, min(8000, max_chars))
+        if not content:
+            return f"[error]: Could not extract content from {url}"
+        return f"Content from {url}:\n\n{content[:limit]}" + (" [truncated]" if len(content) > limit else "")
     except Exception as e:
         return f"[error]: {e}"
 
@@ -286,7 +676,7 @@ async def tool_web_search(query: str) -> str:
     "action": {"type": "string", "description": "Action: 'add', 'list', or 'delete'"},
     "content": {"type": "string", "description": "Content to add (for 'add' action)"},
     "index": {"type": "integer", "description": "Index to delete (for 'delete' action)"},
-})
+}, meta=_WS_NONE)
 def tool_manage_memory(action: str, content: str = "", index: int = -1) -> str:
     memory = load_memory()
     if action == "add":
@@ -312,7 +702,7 @@ def tool_manage_memory(action: str, content: str = "", index: int = -1) -> str:
     "action": {"type": "string", "description": "Git action: status, log, diff, branch, show"},
     "path": {"type": "string", "description": "Path to the git repository"},
     "args": {"type": "string", "description": "Extra args e.g. commit hash"},
-})
+}, meta=_WS_EVIDENCE)
 async def tool_git(action: str, path: str = "~", args: str = "") -> str:
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(_executor, _git_worker, action, path, args)
@@ -323,7 +713,7 @@ async def tool_git(action: str, path: str = "~", args: str = "") -> str:
     "url": {"type": "string", "description": "URL to request"},
     "body": {"type": "string", "description": "JSON body for POST/PUT (optional)"},
     "headers": {"type": "string", "description": "JSON headers dict (optional)"},
-})
+}, meta=_WS_EVIDENCE)
 async def tool_http_request(method: str, url: str, body: str = "", headers: str = "") -> str:
     try:
         h = json.loads(headers) if headers else {}
@@ -552,6 +942,7 @@ def tool_search_symbols(
             "description": "Traversal depth (1 = direct neighbors, 3 = default, max 5)",
         },
     },
+    meta=_WS_DEP,
 )
 def tool_graph_expand(
     project: str,
@@ -651,7 +1042,7 @@ def tool_get_symbol_source(project: str, node_id: str) -> str:
     "remote": {"type": "string", "description": "Remote name from settings (e.g. mac-mini) or user@host"},
     "command": {"type": "string", "description": "Shell command to run on the remote machine"},
     "path": {"type": "string", "description": "Working directory on the remote machine (optional)"},
-})
+}, meta=_WS_EVIDENCE)
 async def tool_ssh(remote: str, command: str, path: str = "") -> str:
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(_executor, _ssh_worker, remote, command, path)

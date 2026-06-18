@@ -47,6 +47,12 @@ class PipelineResult:
     edges_created: int = 0
     edges_resolved: int = 0
     errors: list[str] = field(default_factory=list)
+    # Rich symbol deltas (populated by compile_file)
+    added_names: list[str] = field(default_factory=list)
+    removed_names: list[str] = field(default_factory=list)
+    updated_names: list[str] = field(default_factory=list)
+    # Graph consistency report (populated when verification="full")
+    graph_health: dict = field(default_factory=dict)
 
 
 def _project_state_start(project_id: str, now: str) -> None:
@@ -87,6 +93,30 @@ def _project_state_finish(project_id: str, now: str) -> None:
         )
 
 
+def _check_graph_health(project_id: str) -> dict:
+    """Lightweight consistency checks: dangling edges, FTS/node count parity."""
+    with get_db() as conn:
+        dangling = conn.execute(
+            """SELECT COUNT(*) FROM edges e
+               JOIN nodes fn ON e.from_id = fn.id
+               WHERE fn.project_id = ?
+                 AND e.to_id IS NOT NULL
+                 AND e.to_id NOT IN (SELECT id FROM nodes)""",
+            (project_id,),
+        ).fetchone()[0]
+        node_count = conn.execute(
+            "SELECT COUNT(*) FROM nodes WHERE project_id = ?", (project_id,)
+        ).fetchone()[0]
+        fts_count = conn.execute(
+            "SELECT COUNT(*) FROM nodes_fts WHERE project_id = ?", (project_id,)
+        ).fetchone()[0]
+    return {
+        "dangling_edges": dangling,
+        "fts_node_mismatch": abs(node_count - fts_count),
+        "node_count": node_count,
+    }
+
+
 def _load_changed_files(project_id: str) -> list[dict]:
     """Return file_snapshots rows that need IR recompilation.
 
@@ -110,6 +140,101 @@ def _read_file(root: Path, rel_path: str) -> str | None:
         return (root / rel_path).read_text(encoding="utf-8", errors="replace")
     except OSError:
         return None
+
+
+def compile_file(
+    project_id: str, root: str | Path, rel_path: str, check_health: bool = False
+) -> PipelineResult:
+    """Incrementally recompile a single file and relink affected edges.
+
+    Used by tool_edit_file after a successful edit to keep the graph current
+    without scanning the entire project.
+
+    Args:
+        check_health: if True, run _check_graph_health after linking and attach
+                      the report to result.graph_health.
+    """
+    from compiler.discovery import detect_language, hash_file
+    root = Path(root).resolve()
+    result = PipelineResult()
+
+    filepath = root / rel_path
+    language = detect_language(filepath)
+    file_hash, _ = hash_file(filepath)
+
+    # Snapshot symbol names before the build so we can compute rich deltas
+    with get_db() as conn:
+        before_names: set[str] = {
+            r["name"] for r in conn.execute(
+                "SELECT name FROM nodes WHERE project_id = ? AND path = ?",
+                (project_id, rel_path),
+            ).fetchall()
+        }
+
+    # Update snapshot hash so the file is treated as changed
+    from compiler.ir import file_id
+    fid = file_id(project_id, rel_path)
+    with get_db() as conn:
+        conn.execute(
+            """INSERT INTO file_snapshots (id, project_id, path, language, hash, size)
+               VALUES (?, ?, ?, ?, ?, ?)
+               ON CONFLICT(project_id, path) DO UPDATE SET
+                   hash = excluded.hash,
+                   last_ir_hash = NULL""",
+            (fid, project_id, rel_path, language, file_hash, filepath.stat().st_size),
+        )
+
+    try:
+        source = filepath.read_text(encoding="utf-8", errors="replace")
+    except OSError as e:
+        result.errors.append(str(e))
+        result.files_failed = 1
+        return result
+
+    try:
+        ir = canonicalize(project_id=project_id, path=rel_path, source=source,
+                          language=language, last_ir_hash=None)
+    except Exception as e:
+        result.errors.append(f"canonicalize: {e}")
+        result.files_failed = 1
+        return result
+
+    if ir is None:
+        result.files_skipped_ir = 1
+        return result
+
+    try:
+        br: BuildResult = build(ir)
+        result.files_compiled = 1
+        result.nodes_created = br.nodes_created
+        result.nodes_updated = br.nodes_updated
+        result.nodes_removed = br.nodes_removed
+        result.edges_created = br.edges_created
+    except Exception as e:
+        result.errors.append(f"graph_build: {e}")
+        result.files_failed = 1
+        return result
+
+    # Relink edges touching this file's nodes
+    lr = link(project_id)
+    result.edges_resolved = lr.resolved
+
+    # Compute rich symbol deltas
+    with get_db() as conn:
+        after_names: set[str] = {
+            r["name"] for r in conn.execute(
+                "SELECT name FROM nodes WHERE project_id = ? AND path = ?",
+                (project_id, rel_path),
+            ).fetchall()
+        }
+    result.added_names = sorted(after_names - before_names)
+    result.removed_names = sorted(before_names - after_names)
+    result.updated_names = sorted(before_names & after_names)
+
+    if check_health:
+        result.graph_health = _check_graph_health(project_id)
+
+    return result
 
 
 def compile_project(project_id: str, root: str | Path) -> PipelineResult:

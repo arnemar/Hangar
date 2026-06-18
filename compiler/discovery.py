@@ -39,7 +39,7 @@ from db import get_db
 
 IGNORE_DIRS: frozenset[str] = frozenset({
     "node_modules", ".git", "dist", "build", "target", ".next", ".nuxt",
-    "__pycache__", ".cache", "coverage", "vendor", ".venv", "venv", "env",
+    "__pycache__", ".cache", "coverage", "vendor", ".venv", "venv", "venv_win", "env",
     ".tox", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".hypothesis",
     "generated", ".gradle", ".idea", ".vs", "out", "bin", "obj",
     ".terraform", ".serverless", "cdk.out",
@@ -224,7 +224,11 @@ def scan(project_id: str, root: str | Path, max_file_size: int = 5 * 1024 * 1024
 
             filepath = Path(dirpath) / filename
             ext = "".join(filepath.suffixes)
-            if ext in IGNORE_EXTENSIONS or filepath.suffix in IGNORE_EXTENSIONS:
+            # Check full suffix chain AND single suffix AND .min.js/.min.css by name ending
+            if (ext in IGNORE_EXTENSIONS
+                    or filepath.suffix in IGNORE_EXTENSIONS
+                    or filename.endswith(".min.js")
+                    or filename.endswith(".min.css")):
                 result.skipped += 1
                 continue
 

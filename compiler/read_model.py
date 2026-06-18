@@ -27,6 +27,7 @@ Hot symbols
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 
 from compiler.fts import fts_query
@@ -115,6 +116,32 @@ def _merge(accum: dict[str, _Accumulator], rows: list[dict], source: str) -> Non
         setattr(acc, score_key, max(current, row.get(score_key, 0.0)))
 
 
+def _top_importance_nodes(project_id: str, limit: int) -> list[dict]:
+    """Return the most-connected non-trivial nodes by fan_in, excluding files/folders."""
+    with get_db() as conn:
+        rows = conn.execute(
+            """SELECT id, path, kind, name, parent_id, signature, start_line, end_line,
+                      language, visibility, fan_in, importance, summary, fan_in AS graph_score
+               FROM nodes
+               WHERE project_id = ?
+                 AND kind NOT IN ('file', 'folder', 'project')
+                 AND length(name) > 1
+                 AND path NOT LIKE 'test%'
+                 AND path NOT LIKE 'tests%'
+                 AND path NOT LIKE '%test%'
+               ORDER BY fan_in DESC
+               LIMIT ?""",
+            (project_id, limit),
+        ).fetchall()
+    result = []
+    for r in rows:
+        row = dict(r)
+        max_fan = max(row["fan_in"], 1)
+        row["graph_score"] = row["fan_in"] / max_fan  # will be renormalized after merge
+        result.append(row)
+    return result
+
+
 # ── Main query function ───────────────────────────────────────────────────────
 
 def query(ctx: QueryContext) -> list[SearchResult]:
@@ -122,7 +149,9 @@ def query(ctx: QueryContext) -> list[SearchResult]:
 
     Dispatches to active strategies, merges results by node_id,
     ranks with intent-aware scoring, returns up to retrieval_budget results.
+    Emits a RETRIEVAL_TRACE event for every call (fire-and-forget, never blocks).
     """
+    _t0 = time.monotonic()
     accum: dict[str, _Accumulator] = {}
 
     # ── Strategy 1: FTS5 text search ─────────────────────────────────────────
@@ -146,6 +175,12 @@ def query(ctx: QueryContext) -> list[SearchResult]:
             limit=ctx.retrieval_budget * 3,
         )
         _merge(accum, graph_rows, "graph")
+
+    # ── Strategy 3: Importance fallback for orient / sparse FTS ─────────────────
+    # When orient intent or FTS found almost nothing, pull top-fan_in nodes so
+    # "what is this project about?" gets a real answer even with no good search terms.
+    if ctx.intent == "orient" or len(accum) < 3:
+        _merge(accum, _top_importance_nodes(ctx.project_id, ctx.retrieval_budget * 2), "graph")
 
     if not accum:
         return []
@@ -198,6 +233,41 @@ def query(ctx: QueryContext) -> list[SearchResult]:
             fan_in=n.get("fan_in") or 0,
             summary=n.get("summary"),
         ))
+
+    # ── Emit retrieval trace (fire-and-forget) ────────────────────────────────
+    try:
+        latency_ms = round((time.monotonic() - _t0) * 1000)
+        source_counts: dict[str, int] = {"fts": 0, "graph": 0, "hot": 0}
+        for r in results:
+            for s in r.sources:
+                source_counts[s] = source_counts.get(s, 0) + 1
+            if r.node_id in hot_ids:
+                source_counts["hot"] += 1
+        confidence = round(sum(r.score for r in results) / len(results), 3) if results else 0.0
+        from compiler.events import emit
+        emit(
+            ctx.project_id,
+            "RETRIEVAL_TRACE",
+            entity_id=ctx.session_id,
+            payload={
+                "query": ctx.query_text,
+                "intent": ctx.intent,
+                "session_id": ctx.session_id,
+                "retrieved": [
+                    {"name": r.name, "kind": r.kind, "path": r.path,
+                     "score": round(r.score, 3), "sources": sorted(r.sources)}
+                    for r in results
+                ],
+                "source_counts": source_counts,
+                "result_count": len(results),
+                "budget": ctx.retrieval_budget,
+                "budget_ratio": round(len(results) / max(ctx.retrieval_budget, 1), 2),
+                "confidence": confidence,
+                "latency_ms": latency_ms,
+            },
+        )
+    except Exception:
+        pass  # trace failures must never break retrieval
 
     return results
 

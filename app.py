@@ -16,7 +16,7 @@ from agent import cancel_request, run_agent_stream
 from config import BASE_DIR, DEFAULT_MODEL, to_api_path
 from db import get_db, init_db
 from mcp_client import mcp_manager
-from ollama_client import get_models, stream_ollama
+from ollama_client import get_models, model_supports_tools, stream_ollama
 from projects import find_key_files, read_project_file, scan_project_structure
 from skills import get_all_skills
 from storage import (
@@ -29,7 +29,12 @@ from storage import (
     save_projects,
     save_settings,
 )
-from tools import tool_ssh
+from capabilities import (
+    CHAT_CAPS, WORKSPACE_CAPS,
+    CHAT_POLICY, WORKSPACE_POLICY,
+    build_system_prompt, get_tool_schemas,
+)
+from tools import execute_tool, tool_ssh
 
 # ── Lifespan (startup / shutdown) ────────────────────────────────────────────
 
@@ -119,6 +124,23 @@ async def delete_session(session_id: str):
     return {"ok": True}
 
 
+from compiler.intent import infer_intent as _infer_intent
+
+_LIVE_DATA_SIGNALS = {
+    "current ", "right now", "today", "tonight", "this week", "this month",
+    "latest ", "recent ", "news", "weather", "score", "standings",
+    "price", "prijs", "koers", "rate", "stock", "crypto", "bitcoin",
+    "ethereum", "dollar", "euro", "search for", "look up", "find online",
+    "what happened", "who won", "when is ", "what time",
+}
+
+
+def _needs_web_search(message: str) -> bool:
+    """Heuristic: does this query likely need live/current data from the web?"""
+    m = message.lower()
+    return any(sig in m for sig in _LIVE_DATA_SIGNALS)
+
+
 # ── Chat ──────────────────────────────────────────────────────────────────────
 
 
@@ -128,6 +150,7 @@ class ChatRequest(BaseModel):
     model: Optional[str] = None
     project_id: Optional[str] = None
     intent: Optional[str] = None      # find | orient | explain | edit | impact | debug
+    mode: Optional[str] = "chat"      # chat | workspace
 
 
 @app.post("/api/chat")
@@ -147,31 +170,26 @@ async def chat(req: ChatRequest):
         ).fetchone()
 
     memory = load_memory()
-    parts = ["You are a helpful AI assistant running locally. Be concise and direct."]
-    if s.get("user_name"):
-        parts.append(f"The user's name is {s['user_name']}.")
-    if s.get("system_prompt_chat"):
-        parts.append(s["system_prompt_chat"])
-    if memory["facts"]:
-        facts = "\n".join(f"- {f['content']}" for f in memory["facts"])
-        parts.append(f"\nThings you know about the user:\n{facts}")
 
-    if req.project_id:
-        try:
-            from compiler.context_builder import build_for_query
-            ctx = build_for_query(
-                req.project_id,
-                req.message,
-                intent=req.intent or "find",
-                session_id=req.session_id,
-                token_budget=1500,
-            )
-            if ctx.text:
-                parts.append(ctx.text)
-        except Exception as _ctx_err:
-            parts.append(f"[context retrieval failed: {_ctx_err}]")
+    # Select capability + policy preset from session mode
+    if req.mode == "workspace":
+        caps, policy = WORKSPACE_CAPS, WORKSPACE_POLICY
+    else:
+        caps, policy = CHAT_CAPS, CHAT_POLICY
+    project = get_project(req.project_id) if req.project_id else None
 
-    messages = [{"role": "system", "content": "\n".join(parts)}]
+    system_prompt = build_system_prompt(
+        caps=caps,
+        policy=policy,
+        settings=s,
+        memory=memory,
+        project=project,
+        model=model,
+        query=req.message,
+        session_id=req.session_id,
+    )
+
+    messages = [{"role": "system", "content": system_prompt}]
     for row in rows:
         messages.append({"role": row["role"], "content": row["content"]})
     messages.append({"role": "user", "content": req.message})
@@ -189,28 +207,88 @@ async def chat(req: ChatRequest):
             (now, title, req.session_id),
         )
 
+    tool_schemas = get_tool_schemas(caps)
+    # Only pass tool schemas if the model supports native Ollama tool calling.
+    # For chat mode also gate on a live-data heuristic — models like mistral-nemo
+    # search reflexively when given tools, so we only expose them when the query
+    # actually needs current information.
+    _supports_tools = await model_supports_tools(model, ollama_url)
+    _is_chat = req.mode != "workspace"
+    _give_tools = _supports_tools and (not _is_chat or _needs_web_search(req.message))
+    active_tools = tool_schemas if _give_tools else []
+
     async def generate():
         full = ""
-        try:
-            async for line in stream_ollama(messages, model, num_ctx=num_ctx, ollama_url=ollama_url):
-                try:
-                    data = json.loads(line)
-                    chunk = data.get("message", {}).get("content")
-                    if chunk:
-                        full += chunk
-                        yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
-                    if data.get("done"):
-                        with get_db() as conn:
-                            conn.execute(
-                                "INSERT INTO messages VALUES (?,?,?,?,?,?,?)",
-                                (str(uuid.uuid4()), req.session_id, "assistant",
-                                 full, None, None, datetime.now().isoformat()),
-                            )
-                        yield f"data: {json.dumps({'type': 'done', 'eval_count': data.get('eval_count', 0), 'prompt_eval_count': data.get('prompt_eval_count', 0), 'eval_duration': data.get('eval_duration', 0), 'total_duration': data.get('total_duration', 0)})}\n\n"
-                except json.JSONDecodeError:
-                    pass
-        except Exception as e:
-            yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
+        current_messages = list(messages)
+        final_stats: dict = {}
+
+        for _iteration in range(policy.max_tool_calls + 1):  # +1 for the final answer turn
+            tool_calls_received = None
+            turn_content = ""
+
+            try:
+                async for line in stream_ollama(
+                    current_messages, model,
+                    tools=active_tools,
+                    num_ctx=num_ctx, ollama_url=ollama_url,
+                ):
+                    try:
+                        data = json.loads(line)
+                        msg = data.get("message", {})
+                        chunk = msg.get("content")
+                        if chunk:
+                            full += chunk
+                            turn_content += chunk
+                            yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
+                        # tool_calls may appear on any chunk (model-dependent)
+                        tc = msg.get("tool_calls")
+                        if tc:
+                            tool_calls_received = tc
+                        if data.get("done"):
+                            final_stats = data
+                    except json.JSONDecodeError:
+                        pass
+            except Exception as e:
+                yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
+                return
+
+            if not tool_calls_received:
+                break
+
+            # ── Execute tool calls, inject activity markers into stream ──────
+            current_messages.append({
+                "role": "assistant",
+                "content": turn_content,
+                "tool_calls": tool_calls_received,
+            })
+
+            for tc in tool_calls_received:
+                fn = tc.get("function", {})
+                name = fn.get("name", "")
+                args = fn.get("arguments", {}) if isinstance(fn.get("arguments"), dict) else {}
+
+                # Show a brief indicator so the user knows something is happening
+                label = args.get("query") or args.get("url") or name
+                indicator = f"\n*[{name}: {label[:80]}]*\n"
+                full += indicator
+                yield f"data: {json.dumps({'type': 'chunk', 'content': indicator})}\n\n"
+
+                result = await execute_tool(name, args)
+
+                current_messages.append({
+                    "role": "tool",
+                    "content": result,
+                    "name": name,
+                })
+
+        # Save and close
+        with get_db() as conn:
+            conn.execute(
+                "INSERT INTO messages VALUES (?,?,?,?,?,?,?)",
+                (str(uuid.uuid4()), req.session_id, "assistant",
+                 full, None, None, datetime.now().isoformat()),
+            )
+        yield f"data: {json.dumps({'type': 'done', 'eval_count': final_stats.get('eval_count', 0), 'prompt_eval_count': final_stats.get('prompt_eval_count', 0), 'eval_duration': final_stats.get('eval_duration', 0), 'total_duration': final_stats.get('total_duration', 0)})}\n\n"
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 
@@ -222,7 +300,7 @@ class AgentRequest(BaseModel):
     session_id: str
     message: str
     model: Optional[str] = None
-    project: Optional[str] = None
+    project_id: Optional[str] = None
     request_id: Optional[str] = None
 
 
@@ -245,7 +323,7 @@ async def agent_endpoint(req: AgentRequest):
             session_id=req.session_id,
             message=req.message,
             model=model,
-            project_name=req.project,
+            project_name=req.project_id,
             request_id=req_id,
             settings=s,
         ):
@@ -453,7 +531,21 @@ async def read_file_route(path: str = ""):
 
 @app.get("/api/projects")
 async def get_projects():
-    return {"projects": load_projects()}
+    raw = load_projects()
+    conn = get_db()
+    out = []
+    try:
+        for p in raw:
+            row = conn.execute(
+                "SELECT total_nodes FROM project_state WHERE project_id = ?",
+                (p["name"],),
+            ).fetchone()
+            out.append({**p, "nodes": row["total_nodes"] if row else 0})
+    except Exception as _e:
+        conn.close()
+        return {"projects": raw, "_db_error": str(_e)}
+    conn.close()
+    return {"projects": out}
 
 
 @app.post("/api/projects")
@@ -714,4 +806,8 @@ async def root():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app:app", host="0.0.0.0", port=8080, reload=True)
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--port", type=int, default=8080)
+    args, _ = parser.parse_known_args()
+    uvicorn.run("app:app", host="0.0.0.0", port=args.port, reload=True)

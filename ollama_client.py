@@ -19,6 +19,27 @@ async def get_models(ollama_url: str = "") -> list[str]:
         return []
 
 
+_tool_support_cache: dict[str, bool] = {}
+
+
+async def model_supports_tools(model: str, ollama_url: str = "") -> bool:
+    """Check whether a model supports native Ollama tool calling.
+
+    Result is cached per model name for the lifetime of the process.
+    """
+    if model in _tool_support_cache:
+        return _tool_support_cache[model]
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.post(f"{_url(ollama_url)}/api/show", json={"name": model})
+            caps = r.json().get("capabilities", [])
+            result = "tools" in caps
+    except Exception:
+        result = False
+    _tool_support_cache[model] = result
+    return result
+
+
 def _use_think(model: str) -> bool:
     return "qwen3" in model.lower() or "qwq" in model.lower()
 
@@ -43,6 +64,9 @@ async def stream_ollama(
 
     async with httpx.AsyncClient(timeout=600) as client:
         async with client.stream("POST", f"{_url(ollama_url)}/api/chat", json=payload) as resp:
+            if resp.status_code >= 400:
+                body = await resp.aread()
+                raise RuntimeError(body.decode(errors="replace"))
             async for line in resp.aiter_lines():
                 if line.strip():
                     yield line

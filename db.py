@@ -135,7 +135,8 @@ def init_db() -> None:
             --   EDGE_CREATED/EDGE_RESOLVED/EDGE_REMOVED/
             --   SUMMARY_GENERATED/EMBEDDING_GENERATED/
             --   IMPORTANCE_RECALCULATED/
-            --   COMPILATION_STARTED/COMPILATION_COMPLETED
+            --   COMPILATION_STARTED/COMPILATION_COMPLETED/
+            --   RETRIEVAL_TRACE (query,intent,retrieved,source_counts,confidence,latency_ms)
             CREATE TABLE IF NOT EXISTS events (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id TEXT NOT NULL,

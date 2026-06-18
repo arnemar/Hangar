@@ -29,6 +29,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import AsyncGenerator, Optional
 
+from capabilities import AGENT_CAPS, AGENT_POLICY, build_system_prompt
+from plan import Plan
 from config import IS_WINDOWS, OS_NAME, shell_name
 from db import get_db
 from mcp_client import mcp_manager
@@ -233,166 +235,26 @@ def _model_hints(model: str) -> str:
     return base
 
 
-# ── System prompt ─────────────────────────────────────────────────────────────
-
-def _get_compiled_context(project: dict, query: str) -> str:
-    """Return a token-budgeted code context block if the project has a compiled graph."""
-    try:
-        name = project.get("name", "")
-        if not name:
-            return ""
-        with get_db() as conn:
-            row = conn.execute(
-                "SELECT graph_version, total_nodes FROM project_state WHERE project_id = ?",
-                (name,)
-            ).fetchone()
-        if not row or not row["total_nodes"]:
-            return ""
-        from compiler.context_builder import build_for_query
-        cb = build_for_query(
-            project_id=name,
-            query=query,
-            intent="find",
-            token_budget=3000,
-        )
-        return cb.text if cb.nodes_shown > 0 else ""
-    except Exception:
-        return ""
-
+# ── System prompt (delegated to capabilities.py) ──────────────────────────────
 
 def _build_system_prompt(
     settings: dict,
     memory: dict,
     project: Optional[dict],
-    max_iter: int,
     model: str,
     query: str = "",
+    session_id: str | None = None,
 ) -> str:
-    user_name = settings.get("user_name", "")
-    extra = settings.get("system_prompt_agent", "")
-    home = str(Path.home())
-
-    tool_lines = []
-    for name, t in TOOLS.items():
-        fn_schema = t["schema"]["function"]
-        props = fn_schema["parameters"]["properties"]
-        params = ", ".join(f'{k}: {v.get("type","any")}' for k, v in props.items())
-        tool_lines.append(f"- {name}({params}): {fn_schema['description']}")
-    tool_lines.extend(mcp_manager.get_tool_descriptions())
-
-    if IS_WINDOWS:
-        shell_guidance = (
-            f"You are running on Windows. The shell tool uses {shell_name()}.\n"
-            "Use PowerShell syntax for local commands (Get-ChildItem, Select-String, "
-            "$env:USERPROFILE, Remove-Item).\n"
-            "For SSH remotes (Linux/macOS), use standard bash syntax."
-        )
-    else:
-        shell_guidance = (
-            f"You are running on {OS_NAME}. The shell tool uses {shell_name()}.\n"
-            "Use standard bash/sh syntax."
-        )
-
-    prompt = f"""You are an AI coding agent. Use tools to accomplish tasks — never describe what you would do, just do it.
-
-CRITICAL RULES:
-- CREATE a file → call write_file immediately.
-- RUN a command → call shell immediately.
-- READ a file → call read_file immediately.
-- FIND something → call shell or list_dir immediately.
-- Never say "I will …" — just use the tool.
-- You have up to {max_iter} tool calls. Use as many as the task requires — do not give up early.
-- For multi-step tasks: read first, then act, then verify.
-
-{shell_guidance}
-Home directory: {home}{_model_hints(model)}
-
-Available tools:
-{chr(10).join(tool_lines)}
-
-To use a tool, output ONLY this JSON (with optional Plan: prefix on first response):
-{{"tool": "tool_name", "args": {{"param": "value"}}}}
-
-When done, respond in plain text without any JSON.
-
-Rules:
-- Use tools only when the task requires real data — never fabricate output.
-- Keep final answers concise but complete.
-- Never wrap your final answer in JSON.
-- Avoid slow commands; always add limits (head, -maxdepth, etc.)."""
-
-    if project:
-        from projects import scan_project_structure
-
-        proj_name = project.get("name", "")
-        proj_remote = project.get("remote", "")
-        proj_root = project.get("root", "")
-        loc = f"{proj_remote}:{proj_root}" if proj_remote else proj_root
-        structure = scan_project_structure(project)
-
-        ssh_note = (
-            f'SSH remote — use ssh tool with remote="{proj_remote}" for file ops'
-            if proj_remote
-            else "Local — use read_file / write_file / edit_file / shell for file ops"
-        )
-
-        compiled_context = _get_compiled_context(project, query) if query else ""
-        has_graph = bool(compiled_context)
-
-        prompt += f"""
-
-Active project: {proj_name}
-Location: {loc}
-{ssh_note}
-Stay within {proj_root} unless explicitly asked otherwise.
-Always read current file content before editing."""
-
-        if has_graph:
-            prompt += f"""
-
-CODE INTELLIGENCE RULES (MANDATORY — compiled graph is available):
-USE search_symbols when:
-  - finding any function, class, method, interface, or type by name
-  - locating where something is defined
-  - understanding what a symbol's signature looks like
-
-USE graph_expand(intent="find") when:
-  - you have a node_id and need to see what it calls or imports
-
-USE graph_expand(intent="impact") when:
-  - you need to know what code depends on a symbol (before editing it)
-
-USE get_symbol_source when:
-  - you have a node_id and need the full implementation
-
-USE read_file ONLY when:
-  - search_symbols returned zero results AND you know the exact file path
-  - reading non-code files (README, SQL, YAML config, package.json)
-  - reading a specific range you already located via search_symbols
-
-PROHIBITED when graph is available:
-  - list_dir to explore project structure
-  - shell grep/find to locate symbols
-  - read_file as a first step for any symbol lookup
-
-Context retrieved for this query:
-{compiled_context}"""
-        else:
-            prompt += """
-When asked about the project, read README.md first, then explore key source files (entry points, config files, main modules) — never answer from the file tree alone.
-
-Project structure:
-""" + structure[:2000]
-
-    if user_name:
-        prompt += f"\n\nUser: {user_name}."
-    if memory["facts"]:
-        facts = "\n".join(f"- {f['content']}" for f in memory["facts"])
-        prompt += f"\n\nUser context:\n{facts}"
-    if extra:
-        prompt += f"\n\nAdditional instructions:\n{extra}"
-
-    return prompt
+    return build_system_prompt(
+        caps=AGENT_CAPS,
+        policy=AGENT_POLICY,
+        settings=settings,
+        memory=memory,
+        project=project,
+        model=model,
+        query=query,
+        session_id=session_id,
+    )
 
 
 # ── Planner ───────────────────────────────────────────────────────────────────
@@ -466,12 +328,12 @@ async def run_agent_stream(
 ) -> AsyncGenerator[str, None]:
     cancel_ev = register_request(request_id)
     memory = load_memory()
-    max_iter = settings.get("agent_max_iterations", 12)
+    max_iter = AGENT_POLICY.max_tool_calls
     num_ctx = settings.get("context_length", 8192)
     ollama_url = settings.get("ollama_url", "")
 
     project = get_project(project_name) if project_name else None
-    system_prompt = _build_system_prompt(settings, memory, project, max_iter, model, query=message)
+    system_prompt = _build_system_prompt(settings, memory, project, model, query=message, session_id=session_id)
 
     with get_db() as conn:
         rows = conn.execute(
@@ -515,6 +377,7 @@ async def run_agent_stream(
     iteration = 0
     total_tokens = 0
     start = time.time()
+    plan = Plan(goal=message)
 
     while iteration < max_iter:
         iteration += 1
@@ -592,6 +455,7 @@ async def run_agent_stream(
                 plan_text = content[5:].strip()
                 content = ""
             if plan_text:
+                plan.set_steps(plan_text)
                 yield f"data: {json.dumps({'type': 'plan', 'content': plan_text})}\n\n"
 
         if not content:
@@ -653,6 +517,10 @@ async def run_agent_stream(
 
             all_tool_calls.append({"tool": tool_name, "args": tool_args})
             all_tool_results.append(result)
+            plan.advance(tool_name, tool_args)
+            plan_state = plan.render()
+            if plan_state:
+                yield f"data: {json.dumps({'type': 'plan_state', 'content': plan_state, 'completed': len(plan.completed_steps), 'total': len(plan.steps) or len(plan.completed_steps)})}\n\n"
 
             messages.append({"role": "assistant", "content": content})
             remaining = max_iter - iteration
@@ -689,10 +557,12 @@ async def run_agent_stream(
                 except Exception:
                     pass
             else:
+                plan_state = plan.render()
+                plan_block = f"\n\n{plan_state}" if plan_state else ""
                 messages.append({
                     "role": "user",
                     "content": (
-                        f"Tool result for {tool_name}:\n{truncated}\n\n"
+                        f"Tool result for {tool_name}:\n{truncated}{plan_block}\n\n"
                         f"You have {remaining} tool call(s) remaining. "
                         "Use another tool if needed, otherwise give your final answer in plain text."
                     ),
