@@ -203,9 +203,11 @@ async def chat(req: ChatRequest):
         decision = _search_policy.evaluate(req.message)
         if decision.answer_style:
             system_prompt = decision.answer_style + "\n\n" + system_prompt
-        evidence = await fetch_evidence(decision, req.message, req.session_id)
-        if evidence:
-            system_prompt += f"\n\n{evidence}"
+        result = await fetch_evidence(decision, req.message, req.session_id)
+        if result.quality_hint:
+            system_prompt = result.quality_hint + "\n\n" + system_prompt
+        if result.text:
+            system_prompt += f"\n\n{result.text}"
         messages[0] = {"role": "system", "content": system_prompt}
         active_tools = []
     else:

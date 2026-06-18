@@ -230,25 +230,66 @@ def cache_evidence(session_id: str, search_query: str, evidence: str) -> None:
     )
 
 
+# ── Evidence result ───────────────────────────────────────────────────────────
+
+@dataclass
+class EvidenceResult:
+    """Return type of fetch_evidence(). Carries the context block and a quality hint."""
+    text: str           # formatted context block; empty string when no search needed
+    quality_hint: str   # one-line quality signal prepended to system prompt; "" = none
+
+
+# ── Quality classifier ────────────────────────────────────────────────────────
+
+# Term pairs that suggest conflicting information across sources
+_CONFLICT_PAIRS: list[tuple[set[str], set[str]]] = [
+    ({"discontinued", "unavailable", "no longer", "end of life"},
+     {"available", "in stock", "buy now", "released"}),
+    ({"cancelled", "canceled", "scrapped"},
+     {"confirmed", "announced", "launching"}),
+    ({"not compatible", "not supported"},
+     {"compatible", "supported", "works with"}),
+]
+
+
+def _classify_evidence(snippets: list[dict]) -> str:
+    """Return a one-line quality hint, or empty string when evidence is good."""
+    if not snippets:
+        return "No results found. Answer from training knowledge and state clearly if uncertain."
+
+    if len(snippets) < 2:
+        return "Evidence quality: weak — only one source found. State uncertainty clearly."
+
+    texts = [s.get("snippet", "").lower() for s in snippets]
+    for neg_set, pos_set in _CONFLICT_PAIRS:
+        has_neg = any(any(w in t for w in neg_set) for t in texts)
+        has_pos = any(any(w in t for w in pos_set) for t in texts)
+        if has_neg and has_pos:
+            return "Evidence quality: conflicting — sources disagree. Present both positions clearly."
+
+    return ""   # good evidence needs no special instruction
+
+
 # ── Pipeline execution ────────────────────────────────────────────────────────
 
 async def fetch_evidence(
     decision: SearchDecision,
     query: str,
     session_id: str = "",
-) -> str:
-    """Run the retrieval pipeline and return evidence text for context injection.
+) -> EvidenceResult:
+    """Run the retrieval pipeline and return an EvidenceResult for context injection.
 
-    Returns empty string when no search is needed.
+    Returns EvidenceResult(text="", quality_hint="") when no search is needed.
+    The model never knows whether a search occurred; it only sees "Context:".
     """
     if not decision.search:
-        return ""
+        return EvidenceResult("", "")
 
-    # Cache hit
+    # Cache hit — quality hint not stored (re-classify from text length as proxy)
     if session_id:
         cached = get_cached_evidence(session_id, query)
         if cached:
-            return cached
+            return EvidenceResult(cached, "")
 
     from tools import execute_tool
 
@@ -263,12 +304,13 @@ async def fetch_evidence(
         if not page_raw.startswith("[error]"):
             page_text = page_raw
 
-    evidence = _build_evidence_block(query, decision, snippets, page_text, page_url)
+    quality_hint = _classify_evidence(snippets)
+    text = _build_context_block(snippets, page_text, page_url)
 
     if session_id:
-        cache_evidence(session_id, query, evidence)
+        cache_evidence(session_id, query, text)
 
-    return evidence
+    return EvidenceResult(text, quality_hint)
 
 
 def _parse_search_results(raw: str) -> list[dict]:
@@ -279,19 +321,14 @@ def _parse_search_results(raw: str) -> list[dict]:
         stripped = line.strip()
         if not stripped:
             continue
-        # "1. Title" / "2. Title" ...
         if re.match(r"^\d+\.", stripped):
             if current:
                 results.append(current)
             current = {"title": re.sub(r"^\d+\.\s*", "", stripped), "url": "", "snippet": ""}
         elif stripped.startswith("URL:"):
             current["url"] = stripped[4:].strip()
-        elif current and not stripped.startswith("URL:"):
-            # continuation / snippet line
-            if current.get("snippet"):
-                current["snippet"] += " " + stripped
-            else:
-                current["snippet"] = stripped
+        elif current:
+            current["snippet"] = (current["snippet"] + " " + stripped).strip()
     if current:
         results.append(current)
     return results
@@ -302,48 +339,24 @@ def _domain(url: str) -> str:
     return m.group(1) if m else url
 
 
-def _build_evidence_block(
-    query: str,
-    decision: SearchDecision,
+def _build_context_block(
     snippets: list[dict],
     page_text: str,
     page_url: str,
 ) -> str:
-    confidence_label = (
-        "High" if decision.confidence >= 0.85
-        else "Medium" if decision.confidence >= 0.65
-        else "Low"
-    )
-    lines = [
-        "[WEB EVIDENCE]",
-        f"Query: {query}",
-        f"Type: {decision.query_type}  |  Confidence: {confidence_label}",
-        "",
-        "Search Results:",
-    ]
-    seen_domains: set[str] = set()
-    for i, s in enumerate(snippets, 1):
+    """Build the context block injected into the system prompt.
+
+    Labelled "Context:" — the model doesn't know whether this came from the web,
+    a cache, a document, or an API. Provenance belongs to the runtime.
+    """
+    lines = ["Context:"]
+    for s in snippets:
         domain = _domain(s["url"])
-        seen_domains.add(domain)
-        lines.append(f"{i}. {s['title']}")
-        lines.append(f"   Source: {domain}")
+        if s["title"]:
+            lines.append(f"\n{s['title']} ({domain})")
         if s["snippet"]:
-            lines.append(f"   {s['snippet'][:300]}")
+            lines.append(s["snippet"][:300])
     if page_text:
-        lines += ["", f"Full page content ({_domain(page_url)}):", page_text[:2500]]
-    lines += [
-        "",
-        "Answer using this evidence. Cite sources inline where relevant.",
-        "If facts conflict across sources, say so.",
-    ]
+        lines += [f"\nDetailed source ({_domain(page_url)}):", page_text[:2500]]
+    lines.append("\nAnswer naturally using the context above.")
     return "\n".join(lines)
-
-
-def _extract_top_url(results: str) -> str:
-    for line in results.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("URL:"):
-            url = stripped[4:].strip()
-            if url.startswith("http"):
-                return url
-    return ""
