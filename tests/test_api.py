@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 import tempfile
 import unittest
 from contextlib import ExitStack
@@ -77,8 +78,14 @@ class TestWorkspaceAPI(unittest.IsolatedAsyncioTestCase):
         return "/api/sessions/" + response.json()["id"]
 
     async def test_stream_and_saved_history(self):
-        self.assertEqual((await self.client.get("/")).status_code, 200)
-        self.assertEqual((await self.client.get("/static/js/main.js")).status_code, 200)
+        page = await self.client.get("/")
+        self.assertEqual(page.status_code, 200)
+        asset_links = re.findall(r'"(/assets/[^"]+)"', page.text)
+        self.assertGreater(len(asset_links), 1)
+        for url in asset_links:
+            asset = await self.client.get(url)
+            self.assertEqual(asset.status_code, 200, url)
+            self.assertIn("immutable", asset.headers["cache-control"])
         models = (await self.client.get("/api/models")).json()
         self.assertEqual(models["default"], "test-model")
 
@@ -93,6 +100,38 @@ class TestWorkspaceAPI(unittest.IsolatedAsyncioTestCase):
         await self.client.post(chat + "/chat", json={"message": "Continue"})
         history = self.ollama.requests[-1]["messages"]
         self.assertEqual([message["content"] for message in history[1:]], ["Hello", "Ready.", "Continue"])
+
+    async def test_running_app_serves_one_version_of_the_web_files(self):
+        web = self.project / "web"
+        assets = web / "assets" / "js"
+        assets.mkdir(parents=True)
+        index = web / "index.html"
+        index.write_text('<script src="/static/js/main.js"></script>', encoding="utf-8")
+        script = assets / "main.js"
+        script.write_text("console.log('before')", encoding="utf-8")
+        with patch("hangar.api.app.WEB_DIR", web):
+            running = create_app()
+            script.write_text("console.log('after')", encoding="utf-8")
+            index.write_text('<title>New</title><script src="/static/js/main.js"></script>', encoding="utf-8")
+            replacement = create_app()
+
+        # Reuse the real client type because the fixture patches Ollama's HTTP client.
+        client_type = type(self.client)
+        async with (
+            client_type(transport=httpx.ASGITransport(app=running), base_url="http://127.0.0.1") as old,
+            client_type(transport=httpx.ASGITransport(app=replacement), base_url="http://127.0.0.1") as new,
+        ):
+            before = await old.get("/")
+            after = await new.get("/")
+            before_url = re.search(r'src="([^"]+)"', before.text)[1]
+            after_url = re.search(r'src="([^"]+)"', after.text)[1]
+            self.assertEqual(before.headers["cache-control"], "no-store")
+            self.assertNotIn("New", before.text)
+            self.assertIn("New", after.text)
+            self.assertNotEqual(before_url, after_url)
+            self.assertIn("before", (await old.get(before_url)).text)
+            self.assertIn("after", (await new.get(after_url)).text)
+            self.assertEqual((await new.get(before_url)).status_code, 404)
 
     async def test_attached_file_proposal_requires_review(self):
         registered = await self.client.post("/api/projects", json={"name": "Notes", "root": str(self.project)})
@@ -139,6 +178,56 @@ class TestWorkspaceAPI(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events(retried)[-1]["type"], "done")
         saved = (await self.client.get(chat + "/messages")).json()["messages"]
         self.assertEqual([message["content"] for message in saved], ["First attempt", "Again", "Retry", "Done"])
+
+    async def test_project_picker_browses_directories_and_searches_names(self):
+        working = self.project.resolve() / "Working"
+        child = working / "Example App"
+        child.mkdir(parents=True)
+        (self.project / ".ssh" / "Example private").mkdir(parents=True)
+
+        picker = "/api/projects/folders"
+        with patch("hangar.workspace.folders.Path.home", return_value=self.project):
+            home = await self.client.get(picker)
+        self.assertEqual(home.status_code, 200, home.text)
+        self.assertEqual(home.json()["folders"], [{"name": "Working", "path": str(working)}])
+
+        found = await self.client.get(picker, params={"path": str(self.project), "q": "example"})
+        self.assertEqual(found.json()["folders"], [{"name": "Example App", "path": str(child)}])
+        direct = await self.client.get(picker, params={"path": str(child)})
+        self.assertEqual(direct.json()["folder"]["path"], str(child))
+        self.assertEqual(direct.json()["parent"], str(working))
+        blocked = await self.client.get(picker, params={"path": str(self.project / ".ssh")})
+        self.assertEqual(blocked.status_code, 403)
+        protected = await self.client.get(picker, params={"path": str(files.DATA_DIR)})
+        self.assertEqual(protected.status_code, 403)
+        self.assertEqual((await self.client.get("/api/projects")).json()["projects"], [])
+
+    async def test_generation_settings_round_trip_to_ollama(self):
+        endpoint = "/api/settings"
+        previous = (await self.client.get(endpoint)).json()
+        self.assertIsNone(previous["temperature"])
+        settings = {
+            "ollama_url": previous["ollama_url"],
+            "default_model": "test-model",
+            "context_length": 16384,
+            "temperature": 0,
+            "top_p": 0.8,
+            "max_output_tokens": 2048,
+        }
+        saved = await self.client.put(endpoint, json=settings)
+        self.assertEqual(saved.status_code, 200, saved.text)
+        invalid = await self.client.put(endpoint, json={**settings, "top_p": True})
+        self.assertEqual(invalid.status_code, 400)
+        self.assertEqual((await self.client.get(endpoint)).json()["top_p"], 0.8)
+
+        chat = await self.create_chat()
+        await self.client.post(chat + "/chat", json={"message": "Hello"})
+        self.assertEqual(self.ollama.requests[-1]["options"], {
+            "num_ctx": 16384, "temperature": 0, "top_p": 0.8, "num_predict": 2048,
+        })
+        await self.client.put(endpoint, json={**settings, "temperature": None, "max_output_tokens": None})
+        await self.client.post(chat + "/chat", json={"message": "Again"})
+        self.assertEqual(self.ollama.requests[-1]["options"], {"num_ctx": 16384, "top_p": 0.8})
 
     async def test_rejects_cross_origin_and_invalid_json(self):
         chat = await self.create_chat()

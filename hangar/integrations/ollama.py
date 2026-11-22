@@ -85,8 +85,12 @@ def chat_frame(line: str) -> dict:
 
 async def stream_ollama(
     messages: list[dict], model: str, tools: list[dict], num_ctx: int, address: str,
+    generation: dict[str, int | float] | None = None,
 ) -> AsyncIterator[dict]:
-    payload = {"model": model, "messages": messages, "stream": True, "options": {"num_ctx": num_ctx}}
+    payload = {
+        "model": model, "messages": messages, "stream": True,
+        "options": {"num_ctx": num_ctx, **(generation or {})},
+    }
     if tools:
         payload["tools"] = tools
 

@@ -8,6 +8,7 @@ from hangar.integrations.ollama import OllamaError, model_supports_tools, stream
 from hangar.persistence.conversations import messages_for, record_message
 from hangar.persistence.storage import load_settings
 from hangar.runtime.context import fit_messages, positive_int
+from hangar.runtime.options import generation_options
 from hangar.runtime.prompt import system_prompt, with_attachments
 from hangar.runtime.search import fetch_evidence
 from hangar.runtime.tool_round import tool_events
@@ -34,6 +35,7 @@ async def stream_turn(turn: Turn) -> AsyncIterator[dict]:
     settings = load_settings()
     address = settings["ollama_url"]
     context = max(1024, positive_int(settings.get("context_length"), 8192))
+    generation = generation_options(settings)
     history = [
         {"role": row["role"], "content": row["content"]}
         for row in messages_for(turn.session_id)
@@ -75,7 +77,7 @@ async def stream_turn(turn: Turn) -> AsyncIterator[dict]:
         answer, thinking, calls = [], [], []
         reason = None
         yield {"type": "activity", "content": "Waiting for Ollama"}
-        async with aclosing(stream_ollama(messages, turn.model, available, context, address)) as frames:
+        async with aclosing(stream_ollama(messages, turn.model, available, context, address, generation)) as frames:
             async for frame in frames:
                 message = frame.get("message", {})
                 if chunk := message.get("content"):

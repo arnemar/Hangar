@@ -79,7 +79,7 @@ bindSettings(async () => {
 
 async function start() {
   render();
-  const modelCheck = updateModels();
+  void updateModels();
   const results = await Promise.allSettled([
     api('/api/projects').then(result => { state.projects = result.projects; }),
     api('/api/sessions').then(async result => {
@@ -92,8 +92,6 @@ async function start() {
   renderTranscript({ follow: true });
   const failed = results.find(result => result.status === 'rejected');
   if (failed) notice(failed.reason.message, true);
-  const connectionError = await modelCheck;
-  if (connectionError && !failed && !locked() && el('notice').hidden) notice(connectionError, true);
 }
 
 void start();

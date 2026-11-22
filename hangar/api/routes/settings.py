@@ -9,6 +9,7 @@ from hangar.api.input import read_object, read_switch, read_text
 from hangar.config import OLLAMA_URL
 from hangar.persistence.storage import load_settings, save_settings, saved_facts
 from hangar.runtime.context import positive_int
+from hangar.runtime.options import GENERATION_OPTIONS
 from hangar.workspace.files import WorkspaceError
 
 
@@ -19,6 +20,9 @@ async def get_settings(request):
         "context_length": max(1024, positive_int(settings.get("context_length"), 8192)),
         "system_prompt_chat": settings.get("system_prompt_chat") or "",
         "use_saved_memory": settings.get("use_saved_memory") is True,
+        "default_model": settings.get("default_model") or "",
+        **{key: settings[key] if option.accepts(settings.get(key)) else None
+           for key, option in GENERATION_OPTIONS.items()},
     }
     return JSONResponse({**result, "saved_facts": saved_facts()})
 
@@ -51,6 +55,16 @@ async def update_settings(request):
         "system_prompt_chat": read_text(data.get("system_prompt_chat", ""), "Custom instructions", 20000),
         "use_saved_memory": read_switch(data, "use_saved_memory"),
     }
+    if "default_model" in data:
+        settings["default_model"] = read_text(data["default_model"], "Default model", 200).strip()
+    for key, option in GENERATION_OPTIONS.items():
+        if key not in data:
+            continue
+        value = data[key]
+        if value is not None and not option.accepts(value):
+            kind = "a whole number" if option.whole else "a number"
+            raise WorkspaceError(f"{option.label} must be {kind} from {option.minimum} to {option.maximum}.")
+        settings[key] = value
     save_settings({**load_settings(), **settings})
     return JSONResponse(settings)
 

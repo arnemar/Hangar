@@ -5,7 +5,9 @@ from starlette.routing import Route
 
 from hangar.api.input import read_object, read_text
 from hangar.persistence.storage import get_project, load_projects, save_projects
+from hangar.workspace import files
 from hangar.workspace.files import LocalProject, WorkspaceError, register_root
+from hangar.workspace.folders import browse_folders
 
 
 def require_project(name: str) -> LocalProject:
@@ -20,6 +22,12 @@ async def list_projects(request):
         {"name": record["name"], "root": record.get("root", ""), "local": not record.get("remote")}
         for record in load_projects() if record.get("name")
     ]})
+
+
+def pick_folder(request):
+    path = read_text(request.query_params.get("path", ""), "Folder path", 32767).strip()
+    query = read_text(request.query_params.get("q", ""), "Folder search", 200).strip()
+    return JSONResponse(browse_folders(path, query, files.DATA_DIR))
 
 
 async def create_project(request):
@@ -51,6 +59,7 @@ async def read_file(request):
 routes = [
     Route("/api/projects", list_projects),
     Route("/api/projects", create_project, methods=["POST"]),
+    Route("/api/projects/folders", pick_folder),
     Route("/api/projects/{name}/files", list_files),
     Route("/api/projects/{name}/file", read_file),
 ]

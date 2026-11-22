@@ -1,5 +1,5 @@
 .project-panel {
-  background: #f8faf6; border-left: 1px solid var(--border);
+  background: var(--project-surface); border-left: 1px solid var(--border);
   flex: 0 0 335px; width: 335px; min-width: 0; display: flex; flex-direction: column;
 }
 .project-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 7px; padding: 14px 10px 10px 15px; min-height: 64px; }
@@ -19,7 +19,7 @@
 .file-row span:first-child { color: var(--accent); font-size: 12px; }
 .preview-actions { display: flex; flex-wrap: wrap; gap: 5px; padding: 7px 0; align-items: center; }
 .file-text, .diff {
-  display: block; background: #f1f4ee; color: var(--ink); border: 1px solid var(--border);
+  display: block; background: var(--panel); color: var(--ink); border: 1px solid var(--border);
   border-radius: 7px; max-height: 45vh; overflow: auto; white-space: pre; padding: 7px 9px;
 }
 .change-card { border: 1px solid var(--border); border-radius: 8px; padding: 8px; background: var(--paper); margin-bottom: 8px; }
@@ -27,12 +27,12 @@
 .change-badge { color: var(--muted); margin-left: 8px; font-size: 11px; font-weight: 400; }
 .change-state { color: var(--muted); font-size: 12px; margin: 5px 0; }
 .diff { max-height: 330px; padding: 6px; }
-.diff .added { color: #265d43; background: #e1f4e7; }
-.diff .removed { color: #87392f; background: #fbe6e1; }
+.diff .added { color: var(--diff-add); background: var(--diff-add-surface); }
+.diff .removed { color: var(--diff-remove); background: var(--diff-remove-surface); }
 .empty-panel { color: var(--muted); font-size: 13px; padding: 9px 1px; }
 @media (max-width: 1050px) {
   .project-panel { width: 305px; flex-basis: 305px; }
 }
 @media (max-width: 760px) {
-  .project-panel { position: fixed; inset: 0 0 0 auto; width: min(335px, 86vw); z-index: 7; box-shadow: -12px 0 28px #16221925; }
+  .project-panel { position: fixed; inset: 0 0 0 auto; width: min(335px, 86vw); z-index: 7; box-shadow: -12px 0 28px var(--shadow); }
 }

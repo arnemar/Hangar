@@ -4,9 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Hangar</title>
+  <link rel="stylesheet" href="/static/css/theme.css">
   <link rel="stylesheet" href="/static/css/layout.css">
   <link rel="stylesheet" href="/static/css/conversation.css">
   <link rel="stylesheet" href="/static/css/project.css">
+  <link rel="stylesheet" href="/static/css/dialogs.css">
   <script type="module" src="/static/js/main.js"></script>
 </head>
 <body>
@@ -73,34 +75,84 @@
       <section id="change-list" class="panel-content" aria-label="Proposed changes" hidden></section>
     </aside>
   </div>
-  <dialog id="projects-dialog">
-    <div class="dialog-heading"><h2>Attach a project</h2><button class="icon" type="button" data-close="projects-dialog" aria-label="Close project dialog">×</button></div>
-    <form id="attach-project-form" class="stack">
-      <label>Registered project <select id="registered-project"><option value="">Choose a project</option></select></label>
-      <div class="dialog-actions">
-        <button type="button" class="secondary" id="detach-project" hidden>Detach current</button>
-        <button type="submit" class="primary" id="attach-project" disabled>Attach</button>
+  <dialog id="projects-dialog" aria-labelledby="projects-title">
+    <div class="dialog-heading"><h2 id="projects-title">Attach a project</h2><button class="icon" type="button" data-close="projects-dialog" aria-label="Close project dialog">×</button></div>
+    <form id="attach-project-form" class="stack" hidden>
+      <label for="registered-project">Registered project</label>
+      <div class="dialog-select-row">
+        <select id="registered-project"><option value="">Choose a project</option></select>
+        <button type="submit" class="secondary" id="attach-project" disabled>Attach</button>
+        <button type="button" class="quiet" id="detach-project" hidden>Detach current</button>
       </div>
     </form>
-    <form id="register-project-form" class="stack separated">
-      <h3>Add a local folder</h3>
-      <label>Project name <input id="register-name" required maxlength="100" autocomplete="off"></label>
-      <label>Folder path <input id="register-root" required autocomplete="off" placeholder="/home/me/projects/example"></label>
-      <p class="field-help">Use an absolute path on the computer running Hangar.</p>
-      <div class="dialog-actions"><button type="submit" class="primary">Add and attach</button></div>
-    </form>
+    <section class="folder-picker" aria-label="Browse local folders">
+      <form id="folder-query-form" class="stack">
+        <label for="folder-query">Find a folder</label>
+        <div class="folder-query-row">
+          <input id="folder-query" type="search" autocomplete="off" placeholder="Folder name or absolute path">
+          <button type="submit" class="secondary">Go</button>
+        </div>
+      </form>
+      <div class="folder-toolbar">
+        <button type="button" id="folder-home" class="quiet">Home</button>
+        <button type="button" id="folder-up" class="quiet" disabled>Up</button>
+        <button type="button" id="folder-back" class="quiet" hidden>Back to tree</button>
+        <span id="folder-location"></span>
+        <button type="button" class="quiet current-folder" id="folder-current" hidden>Select this folder</button>
+      </div>
+      <div class="folder-surface">
+        <div id="folder-list" aria-label="Folders"></div>
+        <p class="field-help" id="folder-status" role="status" hidden></p>
+      </div>
+      <p class="field-help" id="folder-selection-hint">Click a folder name to select it.</p>
+      <form id="register-project-form" class="stack" hidden>
+        <div class="dialog-select-row">
+          <label>Project name <input id="register-name" required maxlength="100" autocomplete="off" disabled></label>
+          <button type="submit" id="register-project" class="primary" disabled>Attach folder</button>
+        </div>
+        <output id="selected-folder" aria-live="polite"></output>
+      </form>
+    </section>
     <p class="notice error" id="project-error" role="alert" hidden></p>
   </dialog>
-  <dialog id="settings-dialog">
-    <div class="dialog-heading"><h2>Ollama settings</h2><button class="icon" type="button" data-close="settings-dialog" aria-label="Close settings">×</button></div>
-    <form id="settings-form" class="stack">
-      <label>Ollama URL <input id="ollama-url" placeholder="http://localhost:11434" autocomplete="off"></label>
-      <label>Context window <input id="context-length" type="number" min="1024" step="1" required></label>
-      <label>Custom instructions <textarea id="instructions" rows="4" maxlength="20000"></textarea></label>
-      <div id="memory-options" hidden>
-        <label class="checkbox-label"><input id="use-memory" type="checkbox"> Use saved facts in chat</label>
-        <details><summary>Review saved facts</summary><ul id="saved-facts"></ul></details>
-      </div>
+  <dialog id="settings-dialog" aria-labelledby="settings-title">
+    <div class="dialog-heading"><h2 id="settings-title">Settings</h2><button class="icon" type="button" data-close="settings-dialog" aria-label="Close settings">×</button></div>
+    <div class="dialog-nav" role="group" aria-label="Settings sections">
+      <button type="button" data-settings-tab="appearance" aria-pressed="true">Appearance</button>
+      <button type="button" data-settings-tab="model" aria-pressed="false">Ollama &amp; model</button>
+      <button type="button" data-settings-tab="chat" aria-pressed="false">Chat</button>
+    </div>
+    <form id="settings-form" class="stack" novalidate>
+      <section class="stack settings-section" data-settings-panel="appearance">
+        <label>Theme
+          <select id="theme-select">
+            <option value="system">Follow system</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </label>
+      </section>
+      <section class="stack settings-section" data-settings-panel="model" hidden>
+        <label>Ollama URL <input id="ollama-url" maxlength="2048" placeholder="http://localhost:11434" autocomplete="off"></label>
+        <label>Default model for new chats <select id="default-model"><option value="">Automatic</option></select></label>
+        <label>Context window <input id="context-length" type="number" min="1024" step="1" required></label>
+        <fieldset class="generation-settings">
+          <legend>Generation overrides</legend>
+          <p class="field-help">Leave a field blank to use the model’s default.</p>
+          <div class="settings-grid">
+            <label>Temperature <input id="temperature" type="number" min="0" max="2" step="any" placeholder="Default"></label>
+            <label>Top P <input id="top-p" type="number" min="0" max="1" step="any" placeholder="Default"></label>
+            <label>Max reply tokens <input id="max-output-tokens" type="number" min="1" max="131072" step="1" placeholder="Default"></label>
+          </div>
+        </fieldset>
+      </section>
+      <section class="stack settings-section" data-settings-panel="chat" hidden>
+        <label>Custom instructions <textarea id="instructions" rows="5" maxlength="20000"></textarea></label>
+        <div id="memory-options" hidden>
+          <label class="checkbox-label"><input id="use-memory" type="checkbox"> Use saved facts in chat</label>
+          <details><summary>Review saved facts</summary><ul id="saved-facts"></ul></details>
+        </div>
+      </section>
       <p class="notice error" id="settings-error" role="alert" hidden></p>
       <div class="dialog-actions"><button type="submit" class="primary">Save settings</button></div>
     </form>

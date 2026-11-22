@@ -19,12 +19,14 @@ python app.py
 
 Open [http://127.0.0.1:8080](http://127.0.0.1:8080). Use **Settings** to enter a different Ollama address and **Refresh models** after installing a model. Use `python app.py --port 8081` for a different port, or add `--reload` during development. The browser UI requires no build step.
 
+After updating Hangar, stop the running server with **Ctrl+C**, start it again, and reload the browser page. Each server process serves the browser files it loaded at startup.
+
 ## Work with a project
 
-- **Attach project** registers an absolute folder path on the machine running Hangar. Browse UTF-8 files and attach up to three excerpts per message. Models that support Ollama tool calling can also browse or read the attached project on request.
+- **Attach project** opens a folder tree starting at the home folder on the machine running Hangar. Expand folders, search by name under the current folder, or enter an absolute path and click **Go**. Select the folder and click **Attach folder**. In the project panel, browse UTF-8 files and attach up to three excerpts per message. Models that support Ollama tool calling can also browse or read the attached project on request.
 - **Suggest edits** lets a tool-capable model propose a text replacement or new file. Open **Changes** to review the diff and apply or dismiss it. If the source file changes before approval, request a fresh proposal.
 - **Search web** sends the typed question to DuckDuckGo. Hangar adds any file excerpts separately when it sends the prompt to Ollama.
-- **Settings** controls the Ollama URL, requested context window, custom instructions, and whether to include saved facts.
+- **Settings** offers light, dark, and system themes, along with the Ollama URL, default model, and context window. You can set temperature, top P, and a reply token limit, or leave those fields blank to use model defaults. The **Chat** section controls custom instructions and the use of saved facts. The theme preference is saved in your browser.
 
 Hangar binds to loopback. Its project browser skips links, common credential files, and Hangar's data directory. File previews and proposals accept UTF-8 text files up to 256 KiB. New files need an existing parent folder.
 

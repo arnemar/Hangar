@@ -1,5 +1,6 @@
 import { api } from './api.js';
 import { renderChanges } from './changes.js';
+import { bindFolderPicker } from './folder-picker.js';
 import { browse, clearFiles, refreshFiles } from './project-files.js';
 import { el, locked, notice, state } from './state.js';
 
@@ -35,6 +36,7 @@ export function bindProjects({ setProject }) {
   const dialog = el('projects-dialog');
   const selection = el('registered-project');
   const errorTarget = el('project-error');
+  const folders = bindFolderPicker();
   let busy = false;
 
   function renderPicker() {
@@ -46,6 +48,7 @@ export function bindProjects({ setProject }) {
       selection.add(option);
     }
     selection.value = state.projects.some(project => project.name === current && project.local) ? current : '';
+    el('attach-project-form').hidden = !current && !state.projects.length;
     el('detach-project').hidden = !current;
     el('attach-project').disabled = !selection.value;
   }
@@ -55,13 +58,13 @@ export function bindProjects({ setProject }) {
     notice('', false, errorTarget);
     renderPicker();
     dialog.showModal();
+    folders.open();
   }
 
   async function updateProject(action) {
     if (busy || locked()) return;
     busy = true;
-    const controls = [...dialog.querySelectorAll('button, input, select')];
-    controls.forEach(control => { control.disabled = true; });
+    dialog.inert = true;
     try {
       notice('', false, errorTarget);
       const name = await action();
@@ -73,12 +76,12 @@ export function bindProjects({ setProject }) {
       notice(error.message, true, dialog.open ? errorTarget : el('notice'));
     } finally {
       busy = false;
-      controls.forEach(control => { control.disabled = false; });
-      el('attach-project').disabled = !selection.value;
+      dialog.inert = false;
     }
   }
 
   dialog.addEventListener('cancel', event => { if (busy) event.preventDefault(); });
+  dialog.addEventListener('close', folders.close);
   el('open-projects').addEventListener('click', openDialog);
   el('intro-project').addEventListener('click', openDialog);
   el('toggle-project').addEventListener('click', () => {
@@ -97,14 +100,17 @@ export function bindProjects({ setProject }) {
   });
   el('register-project-form').addEventListener('submit', event => {
     event.preventDefault();
+    const root = folders.selectedPath();
+    if (!root) return;
     void updateProject(async () => {
+      const registered = state.projects.find(project => project.local && project.root === root);
+      if (registered) return registered.name;
       const record = await api('/api/projects', {
-        method: 'POST', data: { name: el('register-name').value, root: el('register-root').value },
+        method: 'POST', data: { name: el('register-name').value, root },
       });
       state.projects.push(record);
       selection.add(new Option(record.name, record.name));
       selection.value = record.name;
-      event.target.reset();
       return record.name;
     });
   });

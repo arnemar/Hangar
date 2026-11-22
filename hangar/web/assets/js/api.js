@@ -15,7 +15,8 @@ async function request(url, { method = 'GET', data, signal } = {}) {
   if (!response.ok) {
     const fallback = 'Request failed (' + response.status + ').';
     const body = await response.json().catch(() => null);
-    throw new Error(detail(body, fallback));
+    const message = detail(body, '');
+    throw Object.assign(new Error(message || fallback), { status: response.status, detail: message });
   }
   return response;
 }

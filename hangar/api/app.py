@@ -6,12 +6,12 @@ from pathlib import Path
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
-from starlette.responses import FileResponse, JSONResponse
-from starlette.routing import Mount, Route
-from starlette.staticfiles import StaticFiles
+from starlette.responses import JSONResponse
+from starlette.routing import Route
 
 from hangar.api.boundary import BrowserBoundary
 from hangar.api.routes import changes, chat, models, projects, sessions, settings
+from hangar.api.web import WebBundle
 from hangar.persistence.conversations import migrate_workspace
 from hangar.persistence.db import init_chat_db
 from hangar.persistence.storage import StoreError
@@ -35,18 +35,16 @@ async def storage_error(request, error):
     return JSONResponse({"detail": str(error)}, status_code=409)
 
 
-async def index(request):
-    return FileResponse(WEB_DIR / "index.html", headers={"Cache-Control": "no-cache"})
-
-
 def create_app() -> Starlette:
+    web = WebBundle(WEB_DIR)
     app = Starlette(
         lifespan=lifespan,
         routes=[
             *(route for feature in (models, sessions, chat, settings, projects, changes)
               for route in feature.routes),
-            Route("/", index),
-            Mount("/static", StaticFiles(directory=WEB_DIR / "assets")),
+            Route("/", web.index),
+            Route("/assets/{version}/{asset:path}", web.asset),
+            Route("/static/{asset:path}", web.asset),
         ],
         middleware=[
             Middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"]),

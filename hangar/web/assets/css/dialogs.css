@@ -1,0 +1,78 @@
+#settings-dialog { width: min(550px, calc(100vw - 28px)); }
+#projects-dialog { width: min(620px, calc(100vw - 28px)); }
+.dialog-nav {
+  display: flex; flex-wrap: wrap; gap: 4px;
+  border-bottom: 1px solid var(--border); margin-bottom: 16px;
+}
+.dialog-nav button {
+  border-radius: 6px 6px 0 0; border-bottom: 2px solid transparent;
+  padding: 5px 11px; color: var(--muted); font-weight: 600;
+}
+.dialog-nav button:hover { background: var(--soft); }
+.dialog-nav button[aria-pressed="true"] { border-bottom-color: var(--accent); color: var(--accent); }
+.settings-section { min-width: 0; }
+.generation-settings { min-width: 0; border: 1px solid var(--border); border-radius: 9px; margin: 0; padding: 11px 12px; }
+.generation-settings legend { padding-inline: 5px; font-size: 13px; font-weight: 650; }
+.generation-settings .field-help { margin: 0 0 8px; }
+.settings-grid { display: grid; gap: 9px; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
+
+.folder-picker { display: grid; gap: 10px; min-width: 0; }
+#attach-project-form { gap: 5px; }
+#attach-project-form:not([hidden]) + .folder-picker {
+  margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border);
+}
+.dialog-select-row { display: flex; align-items: flex-end; gap: 8px; min-width: 0; }
+.dialog-select-row :is(select, label) { flex: 1; min-width: 0; }
+.dialog-select-row button { flex: 0 0 auto; }
+.dialog-select-row select {
+  border: 1px solid var(--border); border-radius: 7px;
+  background: var(--surface); padding: 5px 8px;
+}
+#folder-query-form { gap: 5px; }
+.folder-query-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px; }
+#folder-query {
+  min-width: 0; border: 1px solid var(--border); border-radius: 7px;
+  background: var(--surface); padding: 7px 9px;
+}
+.folder-toolbar { display: flex; gap: 5px; align-items: center; min-width: 0; }
+.folder-toolbar .quiet { padding-inline: 6px; font-size: 12px; flex: 0 0 auto; }
+#folder-location, #selected-folder {
+  display: block; font-size: 12px; color: var(--muted); min-width: 0; flex: 1;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.folder-surface {
+  overflow: auto; max-height: min(38dvh, 330px); min-height: 66px;
+  background: var(--project-surface); border: 1px solid var(--border); border-radius: 9px; padding: 5px;
+}
+.folder-surface > p { margin: 5px; }
+.folder-surface > .notice:not(.error) { background: transparent; }
+.folder-nodes { list-style: none; margin: 0; padding: 0; }
+.folder-children { margin-left: 13px; padding-left: 6px; border-left: 1px solid var(--border); }
+.folder-children p { margin: 5px; }
+.folder-node { display: flex; gap: 2px; align-items: flex-start; }
+.folder-toggle { color: var(--muted); width: 28px; flex: 0 0 28px; padding: 0; }
+.folder-pick {
+  flex: 1; display: grid; gap: 8px; grid-template-columns: 15px minmax(0, 1fr); min-width: 0; align-items: center;
+  text-align: left; overflow-wrap: anywhere; padding: 4px 7px;
+}
+.folder-glyph {
+  width: 13px; height: 10px; border: 1px solid var(--accent);
+  border-radius: 2px; position: relative;
+}
+.folder-glyph::before {
+  content: ""; position: absolute; left: -1px; top: -4px; width: 7px; height: 4px;
+  border: 1px solid var(--accent); border-bottom: 0; border-radius: 2px 2px 0 0;
+}
+.folder-pick small { display: block; color: var(--muted); font-size: 11px; }
+.folder-toggle:hover, .folder-pick:hover { background: var(--soft); }
+.folder-pick[aria-pressed="true"] { background: var(--accent-light); color: var(--accent); }
+.current-folder { color: var(--accent); white-space: nowrap; }
+#register-project-form { gap: 5px; padding-top: 3px; }
+
+@media (max-width: 420px) {
+  #settings-dialog, #projects-dialog { padding: 14px; }
+  .dialog-nav button { font-size: 12px; padding-inline: 6px; }
+  .folder-toolbar { flex-wrap: wrap; }
+  #folder-location { flex-basis: min(40%, 120px); }
+  .dialog-select-row { flex-wrap: wrap; }
+}

@@ -21,7 +21,7 @@
 .answer blockquote { margin-left: 0; padding-left: 12px; border-left: 2px solid var(--border); color: var(--muted); }
 .answer code, .file-text, .diff { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: .89em; }
 .answer code { background: var(--soft); padding: 1px 4px; border-radius: 4px; }
-.code-block { border: 1px solid var(--border); border-radius: 9px; background: #f5f7f2; margin: 10px 0; overflow: hidden; }
+.code-block { border: 1px solid var(--border); border-radius: 9px; background: var(--code); margin: 10px 0; overflow: hidden; }
 .code-toolbar { display: flex; justify-content: space-between; align-items: center; padding: 2px 8px; color: var(--muted); font-size: 12px; border-bottom: 1px solid var(--border); }
 .code-block pre { overflow: auto; margin: 0; padding: 10px 12px; }
 .code-block code { padding: 0; background: none; }
@@ -30,20 +30,19 @@
 .activity { color: var(--muted); font-size: 13px; padding-left: 11px; border-left: 2px solid #87b6a0; margin-block: 6px 14px; }
 .composer-area { width: min(760px, 100%); margin-inline: auto; padding: 4px 22px 12px; }
 .composer {
-  border: 1px solid #cfd9cd; background: white; border-radius: 15px; padding: 9px 9px 8px;
-  box-shadow: 0 4px 18px #17251b0a;
+  border: 1px solid var(--border); background: var(--surface); border-radius: 15px; padding: 9px 9px 8px;
 }
-.composer:focus-within { border-color: #8eb6a4; }
+.composer:focus-within { border-color: var(--focus-ring); }
 .composer textarea { display: block; width: 100%; resize: vertical; min-height: 48px; max-height: 35vh; padding: 6px 7px; border: 0; outline: none; background: transparent; }
 .composer-controls { display: flex; gap: 6px; align-items: center; justify-content: end; }
 .composer-options { flex: 1; display: flex; align-items: center; flex-wrap: wrap; gap: 5px; }
 .composer-note { text-align: center; font-size: 12px; color: var(--muted); margin-top: 7px; }
 .chip { border: 1px solid var(--border); color: var(--muted); min-height: 29px; border-radius: 20px; padding: 3px 8px; font-size: 12px; }
-.chip[aria-pressed="true"] { color: #174d38; border-color: #99c3af; background: var(--accent-light); }
+.chip[aria-pressed="true"] { color: var(--accent); border-color: var(--border); background: var(--accent-light); }
 .attachments { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 6px 6px; }
 .attachments button { min-height: 26px; max-width: 100%; overflow-wrap: anywhere; }
 .notice { color: var(--muted); background: var(--soft); margin: 0 0 7px; border-radius: 6px; padding: 6px 9px; font-size: 13px; overflow-wrap: anywhere; }
-.notice.error { color: var(--danger); background: #fff2ee; }
+.notice.error { color: var(--danger); background: var(--danger-surface); }
 @media (max-width: 500px) {
   .composer-area { padding-inline: 9px; }
   .transcript { padding-inline: 13px; }
