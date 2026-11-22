@@ -1,41 +1,40 @@
-"""The complete set of model-accessible operations on an attached project."""
+"""Read project files and prepare edits through a fixed set of Ollama tools."""
 
 import json
-
-from pydantic import BaseModel, Field, ValidationError
-from typing import Literal
 
 from hangar.workspace.changes import propose_change
 from hangar.workspace.files import LocalProject, WorkspaceError
 
+LIST = "list_project_files"
+READ = "read_project_file"
+PROPOSE = "propose_file_change"
 
-class ListFiles(BaseModel):
-    path: str = Field(default="", description="Folder relative to the project. Empty lists the root.")
-
-
-class ReadFile(BaseModel):
-    path: str = Field(description="File path relative to the project.")
-    start_line: int = Field(default=1, ge=1, description="First line to read, starting at 1.")
-    end_line: int | None = Field(default=None, ge=1, description="Last line to read, inclusive.")
-
-
-class ProposeEdit(BaseModel):
-    path: str = Field(description="File path relative to the project.")
-    operation: Literal["replace", "create"]
-    old_text: str = Field(default="", description="Exact text that appears once in an existing file. Omit for create.")
-    new_text: str = Field(description="Replacement text or the contents of the new file.")
-
-
-_TOOLS = {
-    "list_project_files": (ListFiles, "List files and folders in the attached project."),
-    "read_project_file": (ReadFile, "Read a range of lines from a text file in the attached project."),
-    "propose_file_change": (ProposeEdit, "Draft a file change for the user to review. Does not write any file."),
+_PATH = {"type": "string", "description": "Path relative to the attached project."}
+_LINE = {"type": "integer", "minimum": 1}
+_DEFINITIONS = {
+    LIST: (
+        "List files and folders. An empty path lists the project root.",
+        {"path": _PATH}, [],
+    ),
+    READ: (
+        "Read a range of lines from a project file. Line numbers start at 1 and are inclusive.",
+        {"path": _PATH, "start_line": _LINE, "end_line": _LINE}, ["path"],
+    ),
+    PROPOSE: (
+        "Prepare an edit for the user to review.",
+        {
+            "path": _PATH,
+            "operation": {"type": "string", "enum": ["replace", "create"]},
+            "old_text": {"type": "string", "description": "Exact text that occurs once. Omit when creating."},
+            "new_text": {"type": "string", "description": "Replacement text or the contents of the new file."},
+        },
+        ["path", "operation", "new_text"],
+    ),
 }
-
 _ACTIVITY = {
-    "list_project_files": "Listing project files",
-    "read_project_file": "Reading a project file",
-    "propose_file_change": "Preparing a change for review",
+    LIST: "Listing project files",
+    READ: "Reading a project file",
+    PROPOSE: "Preparing a change for review",
 }
 
 
@@ -46,54 +45,75 @@ def activity(name: str) -> str:
 def schemas(allow_proposals: bool) -> list[dict]:
     return [
         {"type": "function", "function": {
-            "name": name, "description": description, "parameters": model.model_json_schema(),
+            "name": name, "description": description,
+            "parameters": {"type": "object", "properties": properties, "required": required},
         }}
-        for name, (model, description) in _TOOLS.items()
-        if name != "propose_file_change" or allow_proposals
+        for name, (description, properties, required) in _DEFINITIONS.items()
+        if name != PROPOSE or allow_proposals
     ]
 
 
-def _read(project: LocalProject, request: ReadFile) -> str:
-    rows = project.read(request.path).splitlines()
-    count = len(rows)
-    start = request.start_line
-    if start > count:
-        return f"{request.path} has {count} lines."
-    end = min(request.end_line or count, start + 159, count)
-    if end < start:
+def read_lines(project: LocalProject, path: str, start: int, end: int | None) -> str:
+    if end is not None and end < start:
         raise WorkspaceError("The last line must come after the first line.")
+    rows = project.read(path).splitlines()
+    count = len(rows)
+    if start > count:
+        return f"{path} has {count} lines."
+
     lines = []
     remaining = 12000
-    for number in range(start, end + 1):
-        line = rows[number - 1]
-        if len(line) + 16 > remaining:
-            if number == start:
-                lines.append(f"{number}: {line[:remaining-25]} [line truncated]")
-            else:
-                end = number - 1
+    for number in range(start, min(end or count, start + 159, count) + 1):
+        value = f"{number}: {rows[number - 1]}"
+        if len(value) >= remaining:
+            if not lines:
+                lines.append(value[:remaining - 18] + " [line truncated]")
             break
-        value = f"{number}: {line}"
         lines.append(value)
         remaining -= len(value) + 1
-    return f"{request.path} (lines {start}-{end} of {count})\n" + "\n".join(lines)
+    return f"{path} (lines {start}-{start + len(lines) - 1} of {count})\n" + "\n".join(lines)
+
+
+def tool_arguments(name: str, args: object) -> dict:
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except (ValueError, RecursionError) as exc:
+            raise WorkspaceError("Invalid tool arguments. Supply a JSON object.") from exc
+    if not isinstance(args, dict):
+        raise WorkspaceError("Invalid tool arguments. Supply an object.")
+    _, properties, required = _DEFINITIONS[name]
+    for field in required:
+        if field not in args:
+            raise WorkspaceError(f"Missing tool argument {field}.")
+    values = {}
+    for field, schema in properties.items():
+        if field not in args or (field == "end_line" and args[field] is None):
+            continue
+        value = args[field]
+        if schema["type"] == "integer":
+            if type(value) is not int or value < 1:
+                raise WorkspaceError(f"Tool argument {field} must be a positive whole number.")
+        elif not isinstance(value, str):
+            raise WorkspaceError(f"Tool argument {field} must be text.")
+        else:
+            value.encode("utf-8")
+        values[field] = value
+    return values
 
 
 def run_tool(
     name: str, args: object, session_id: str, project: LocalProject, allow_proposals: bool,
 ) -> tuple[str, dict | None]:
-    if name not in _TOOLS or (name == "propose_file_change" and not allow_proposals):
+    if name not in _DEFINITIONS or (name == PROPOSE and not allow_proposals):
         return "This tool is unavailable in this chat.", None
     try:
-        request = _TOOLS[name][0].model_validate(args)
-        if name == "list_project_files":
-            return json.dumps(project.entries(request.path), ensure_ascii=False), None
-        if name == "read_project_file":
-            return _read(project, request), None
-        proposal = propose_change(session_id, project, **request.model_dump())
+        values = tool_arguments(name, args)
+        if name == LIST:
+            return json.dumps(project.entries(values.get("path", "")), ensure_ascii=False), None
+        if name == READ:
+            return read_lines(project, values["path"], values.get("start_line", 1), values.get("end_line")), None
+        proposal = propose_change(session_id, project, **values)
         return f"Proposed a change to {proposal['path']}. The user must review it before it is applied.", proposal
-    except ValidationError as exc:
-        issue = exc.errors(include_input=False)[0]
-        field = ".".join(map(str, issue["loc"]))
-        return f"Invalid tool arguments: {field} {issue['msg']}".strip(), None
-    except WorkspaceError as exc:
+    except (WorkspaceError, UnicodeError) as exc:
         return str(exc), None

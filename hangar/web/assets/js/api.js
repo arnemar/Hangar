@@ -27,6 +27,9 @@ export async function api(url, options) {
 
 export async function* chatEvents(url, data, signal) {
   const response = await request(url, { method: 'POST', data, signal });
+  if (!response.headers.get('content-type')?.startsWith('text/event-stream') || !response.body) {
+    throw new Error('Hangar returned an invalid chat stream.');
+  }
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';

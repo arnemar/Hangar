@@ -1,57 +1,61 @@
-"""Settings for the local Ollama connection."""
+"""Configure the Ollama connection, context window, and system prompt."""
 
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter
-from pydantic import BaseModel, Field
+from starlette.responses import JSONResponse
+from starlette.routing import Route
 
+from hangar.api.input import read_object, read_switch, read_text
 from hangar.config import OLLAMA_URL
-from hangar.persistence.storage import load_memory, load_settings, save_settings
+from hangar.persistence.storage import load_settings, save_settings, saved_facts
 from hangar.runtime.context import positive_int
 from hangar.workspace.files import WorkspaceError
 
-router = APIRouter()
 
-
-class Settings(BaseModel):
-    ollama_url: str
-    context_length: int = Field(ge=1024)
-    system_prompt_chat: str = Field(default="", max_length=20000)
-    use_saved_memory: bool = False
-
-
-@router.get("/api/settings")
-async def get_settings():
+async def get_settings(request):
     settings = load_settings()
-    return {
-        "ollama_url": settings.get("ollama_url") or OLLAMA_URL,
+    result = {
+        "ollama_url": settings["ollama_url"],
         "context_length": max(1024, positive_int(settings.get("context_length"), 8192)),
         "system_prompt_chat": settings.get("system_prompt_chat") or "",
         "use_saved_memory": settings.get("use_saved_memory") is True,
-        "saved_facts": [
-            str(item["content"]) for item in (load_memory().get("facts") or [])
-            if isinstance(item, dict) and item.get("content")
-        ],
     }
+    return JSONResponse({**result, "saved_facts": saved_facts()})
 
 
-@router.put("/api/settings")
-async def update_settings(request: Settings):
-    url = request.ollama_url.strip().rstrip("/")
-    if not url:
-        url = OLLAMA_URL
+def ollama_url(value: object) -> str:
+    url = read_text(value, "Ollama address", 2048).strip().rstrip("/") or OLLAMA_URL
     try:
         parsed = urlsplit(url)
-        valid = (
+        port = parsed.port
+        if (
             parsed.scheme in {"http", "https"} and parsed.hostname
-            and not (parsed.username or parsed.password or parsed.query or parsed.fragment)
-        )
-        parsed.port
+            and parsed.username is None and parsed.password is None
+            and not parsed.query and not parsed.fragment and port != 0
+            and not any(character.isspace() or ord(character) < 32 for character in url)
+        ):
+            return url
     except ValueError:
-        valid = False
-    if not valid:
-        raise WorkspaceError("Use an HTTP or HTTPS Ollama address, such as http://localhost:11434.")
-    data = request.model_dump()
-    data["ollama_url"] = url
-    save_settings({**load_settings(), **data})
-    return data
+        pass
+    raise WorkspaceError("Use an HTTP or HTTPS Ollama address, such as http://localhost:11434.")
+
+
+async def update_settings(request):
+    data = await read_object(request)
+    context = data.get("context_length")
+    if type(context) is not int or context < 1024:
+        raise WorkspaceError("Context window must be a whole number of at least 1,024.")
+    settings = {
+        "ollama_url": ollama_url(data.get("ollama_url")),
+        "context_length": context,
+        "system_prompt_chat": read_text(data.get("system_prompt_chat", ""), "Custom instructions", 20000),
+        "use_saved_memory": read_switch(data, "use_saved_memory"),
+    }
+    save_settings({**load_settings(), **settings})
+    return JSONResponse(settings)
+
+
+routes = [
+    Route("/api/settings", get_settings),
+    Route("/api/settings", update_settings, methods=["PUT"]),
+]

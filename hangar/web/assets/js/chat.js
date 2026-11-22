@@ -1,10 +1,9 @@
 import { chatEvents, sessionUrl } from './api.js';
-import { button, el, notice, state } from './state.js';
+import { button, currentModel, el, locked, notice, state } from './state.js';
 import { renderTranscript, updateStream } from './transcript.js';
 
 export function renderComposer() {
-  const busy = !!state.run || state.switching;
-  const model = state.session?.model || state.draftModel || state.defaultModel;
+  const busy = locked();
   const project = state.session?.project_name;
   const edit = el('suggest-edits');
   const search = el('search-web');
@@ -15,9 +14,11 @@ export function renderComposer() {
   search.setAttribute('aria-pressed', String(state.searchWeb));
   el('message').disabled = busy;
   el('send').hidden = !!state.run;
-  el('send').disabled = busy || !state.models.includes(model)
+  el('send').disabled = busy || state.refreshingModels || !state.models.includes(currentModel())
     || !(el('message').value.trim() || state.attachments.length);
   el('stop').hidden = !state.run;
+  el('stop').disabled = !!state.run?.stopping;
+  el('stop').textContent = state.run?.stopping ? 'Stopping…' : 'Stop';
   const files = el('attachments');
   files.hidden = !state.attachments.length;
   files.replaceChildren(...state.attachments.map(path => {
@@ -44,7 +45,7 @@ export function clearDraft() {
 }
 
 export function attachFile(path) {
-  if (state.run || state.switching || state.attachments.includes(path)) return;
+  if (locked() || state.attachments.includes(path)) return;
   if (state.attachments.length >= 3) {
     notice('Attach up to three file excerpts per message.', true);
     return;
@@ -62,7 +63,7 @@ export function bindChat({ ensureSession, settle, renderChrome, onProposal }) {
     const run = {
       controller: new AbortController(),
       message: draft.trim(), attachments: [...state.attachments],
-      answer: '', activity: 'Starting', started: false, done: false,
+      answer: '', activity: 'Starting', started: false, done: false, stopping: false,
     };
     const options = { propose_edits: state.proposeEdits, search_web: state.searchWeb };
     if (options.search_web && !run.message) {
@@ -117,6 +118,10 @@ export function bindChat({ ensureSession, settle, renderChrome, onProposal }) {
       try {
         if (run.sessionId) await settle(run.sessionId);
       } catch (error) {
+        if (run.started) {
+          state.messages.push({ role: 'user', content: run.message, attachments: run.attachments });
+          if (run.done) state.messages.push({ role: 'assistant', content: run.answer });
+        }
         notice(error.message, true);
       } finally {
         state.run = null;
@@ -133,7 +138,12 @@ export function bindChat({ ensureSession, settle, renderChrome, onProposal }) {
       if (!el('send').disabled) el('composer').requestSubmit();
     }
   });
-  el('stop').addEventListener('click', () => state.run?.controller.abort());
+  el('stop').addEventListener('click', () => {
+    if (!state.run || state.run.stopping) return;
+    state.run.stopping = true;
+    state.run.controller.abort();
+    renderComposer();
+  });
   el('search-web').addEventListener('click', () => {
     state.searchWeb = !state.searchWeb;
     renderComposer();

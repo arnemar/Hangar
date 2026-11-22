@@ -44,6 +44,11 @@ def find_session(session_id: str, conn: sqlite3.Connection) -> dict | None:
     return dict(row) if row else None
 
 
+def get_session(session_id: str) -> dict | None:
+    with get_db() as conn:
+        return find_session(session_id, conn)
+
+
 def list_sessions() -> list[dict]:
     with get_db() as conn:
         return [dict(row) for row in conn.execute(f"SELECT {_SESSION} FROM sessions ORDER BY updated_at DESC")]
@@ -75,7 +80,15 @@ def messages_for(session_id: str) -> list[dict]:
             "SELECT id,role,content,created_at,attachments FROM messages "
             "WHERE session_id=? ORDER BY created_at, rowid", (session_id,),
         ).fetchall()
-    return [{**dict(row), "attachments": json.loads(row["attachments"] or "[]")} for row in rows]
+    messages = []
+    for row in rows:
+        try:
+            paths = json.loads(row["attachments"] or "[]")
+        except (TypeError, ValueError):
+            paths = []
+        attachments = [path for path in paths if isinstance(path, str)] if isinstance(paths, list) else []
+        messages.append({**dict(row), "attachments": attachments})
+    return messages
 
 
 def record_message(

@@ -1,27 +1,31 @@
-"""Human review endpoints. Model tools only create pending proposals."""
+"""Apply or dismiss a pending change after user review."""
 
-from typing import Literal
+from starlette.responses import JSONResponse
+from starlette.routing import Route
 
-from fastapi import APIRouter
-from pydantic import BaseModel
-
+from hangar.api.input import read_object
 from hangar.api.routes.sessions import require_idle, require_session
 from hangar.workspace.changes import changes_for, decide_change
-
-router = APIRouter()
-
-
-class ChangeDecision(BaseModel):
-    decision: Literal["apply", "dismiss"]
+from hangar.workspace.files import WorkspaceError
 
 
-@router.get("/api/sessions/{session_id}/changes")
-async def list_changes(session_id: str):
+async def list_changes(request):
+    session_id = request.path_params["session_id"]
     require_session(session_id)
-    return {"changes": changes_for(session_id)}
+    return JSONResponse({"changes": changes_for(session_id)})
 
 
-@router.post("/api/sessions/{session_id}/changes/{change_id}")
-async def review_change(session_id: str, change_id: str, request: ChangeDecision):
-    require_idle(session_id)
-    return decide_change(session_id, change_id, request.decision)
+async def review_change(request):
+    data = await read_object(request)
+    decision = data.get("decision")
+    if decision not in ("apply", "dismiss"):
+        raise WorkspaceError("Choose apply or dismiss.")
+    session_id = request.path_params["session_id"]
+    require_idle(request, session_id)
+    return JSONResponse(decide_change(session_id, request.path_params["change_id"], decision))
+
+
+routes = [
+    Route("/api/sessions/{session_id}/changes", list_changes),
+    Route("/api/sessions/{session_id}/changes/{change_id}", review_change, methods=["POST"]),
+]

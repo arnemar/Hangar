@@ -1,236 +1,111 @@
-import { api, sessionUrl } from './api.js';
-import { attachFile, renderComposer } from './chat.js';
-import { button, el, node, notice, state } from './state.js';
+import { api } from './api.js';
+import { renderChanges } from './changes.js';
+import { browse, clearFiles, refreshFiles } from './project-files.js';
+import { el, locked, notice, state } from './state.js';
 
-const browser = () => el('file-browser');
-const panel = () => el('project-panel');
-let tab = 'files';
-let fileRequest = 0;
-
-function projectUrl(suffix, path = '') {
-  return '/api/projects/' + encodeURIComponent(state.session.project_name) + suffix
-    + '?' + new URLSearchParams({ path });
-}
-
-function fileStatus(text, error = false) {
-  browser().replaceChildren(node('p', { text, className: error ? 'notice error' : 'empty-panel' }));
-}
-
-function parent(path) {
-  return path.split('/').slice(0, -1).join('/');
-}
-
-async function browse(path = '') {
-  const serial = ++fileRequest;
-  fileStatus('Loading files…');
-  try {
-    const result = await api(projectUrl('/files', path));
-    if (serial !== fileRequest) return;
-    browser().replaceChildren();
-    if (path) browser().append(button('← Parent folder', () => browse(parent(path))));
-    browser().append(node('p', { text: path || 'Project root', className: 'folder-path' }));
-    for (const file of result.entries) {
-      const row = button('', () => file.directory ? browse(file.path) : preview(file.path), 'file-row');
-      const icon = node('span', { text: file.directory ? '▸' : '·' });
-      icon.setAttribute('aria-hidden', 'true');
-      row.append(icon, node('span', { text: file.name }));
-      browser().append(row);
-    }
-    if (!result.entries.length) browser().append(node('p', { text: 'No files in this folder.', className: 'empty-panel' }));
-    if (result.truncated) browser().append(node('p', { text: 'Showing the first 300 files and folders.', className: 'empty-panel' }));
-  } catch (error) {
-    if (serial === fileRequest) fileStatus(error.message, true);
-  }
-}
-
-async function preview(path) {
-  const serial = ++fileRequest;
-  fileStatus('Opening file…');
-  try {
-    const result = await api(projectUrl('/file', path));
-    if (serial !== fileRequest) return;
-    const actions = node('div', { className: 'preview-actions' });
-    const attach = button('Attach excerpt', () => {
-      attachFile(path);
-      if (state.attachments.includes(path)) {
-        attach.textContent = 'Attached';
-        if (matchMedia('(max-width: 760px)').matches) closeProject();
-      }
-    }, 'secondary');
-    actions.append(button('← Files', () => browse(parent(path))), attach);
-    browser().replaceChildren(
-      actions,
-      node('p', { text: path, className: 'folder-path' }),
-      node('pre', { text: result.content, className: 'file-text' }),
-    );
-  } catch (error) {
-    if (serial !== fileRequest) return;
-    fileStatus(error.message, true);
-    browser().append(button('← Files', () => browse(parent(path))));
-  }
+function selectTab(tab) {
+  const files = tab === 'files';
+  el('files-tab').setAttribute('aria-pressed', String(files));
+  el('changes-tab').setAttribute('aria-pressed', String(!files));
+  el('file-browser').hidden = !files;
+  el('change-list').hidden = files;
+  if (files && !el('file-browser').hasChildNodes()) void browse();
+  if (!files) renderChanges();
 }
 
 export function closeProject() {
-  ++fileRequest;
-  panel().hidden = true;
+  clearFiles();
+  el('project-panel').hidden = true;
   el('toggle-project').setAttribute('aria-expanded', 'false');
 }
 
-function selectTab(next) {
-  tab = next;
-  el('files-tab').setAttribute('aria-pressed', String(tab === 'files'));
-  el('changes-tab').setAttribute('aria-pressed', String(tab === 'changes'));
-  browser().hidden = tab !== 'files';
-  el('change-list').hidden = tab !== 'changes';
-  if (tab === 'changes') renderChanges();
-}
-
-export function openProject(show = 'files') {
-  if (!state.session?.project_name) return;
-  panel().hidden = false;
-  el('toggle-project').setAttribute('aria-expanded', 'true');
-  const project = state.projects.find(project => project.name === state.session.project_name);
-  el('project-title').textContent = state.session.project_name;
+export function openProject(tab = 'files') {
+  const name = state.session?.project_name;
+  if (!name) return;
+  const project = state.projects.find(item => item.name === name);
+  el('project-title').textContent = name;
   el('project-path').textContent = project?.root || '';
   el('project-path').title = project?.root || '';
-  selectTab(show);
-  if (show === 'files') void browse();
+  el('project-panel').hidden = false;
+  el('toggle-project').setAttribute('aria-expanded', 'true');
+  selectTab(tab);
 }
 
-async function decide(change, decision, errorTarget) {
-  if (state.run || state.switching) return;
-  const id = state.session.id;
-  const container = errorTarget.parentElement;
-  const actions = [...container.querySelectorAll('button')];
-  actions.forEach(action => { action.disabled = true; });
-  try {
-    const changed = await api(sessionUrl(id, '/changes/' + encodeURIComponent(change.id)), {
-      method: 'POST', data: { decision },
-    });
-    if (state.session?.id !== id) return;
-    state.changes = state.changes.map(item => item.id === changed.id ? changed : item);
-    if (changed.status === 'applied') {
-      ++fileRequest;
-      browser().replaceChildren();
-    }
-    renderChanges();
-  } catch (error) {
-    if (state.session?.id === id) notice(error.message, true, errorTarget);
-  } finally {
-    actions.forEach(action => { action.disabled = false; });
-  }
-}
-
-function diffView(diff) {
-  const pre = node('pre', { className: 'diff' });
-  for (const line of diff.split('\n')) {
-    const className = line[0] === '+' ? 'added' : line[0] === '-' ? 'removed' : '';
-    pre.append(node('span', { text: line, className }), document.createTextNode('\n'));
-  }
-  return pre;
-}
-
-export function renderChanges() {
-  const list = el('change-list');
-  const pending = state.changes.filter(change => change.status === 'pending').length;
-  el('changes-tab').textContent = pending ? 'Changes (' + pending + ')' : 'Changes';
-  if (list.hidden || panel().hidden) return;
-  const opened = new Set([...list.querySelectorAll('details[open]')].map(row => row.dataset.id));
-  list.replaceChildren();
-  if (!state.changes.length) {
-    list.append(node('p', { text: 'No file changes have been proposed in this chat.', className: 'empty-panel' }));
-    return;
-  }
-  for (const change of [...state.changes].reverse()) {
-    const card = node('details', { className: 'change-card' });
-    card.dataset.id = change.id;
-    card.open = opened.has(change.id) || change.status === 'pending';
-    const summary = node('summary', { text: change.path });
-    const status = { pending: 'Review required', applied: 'Applied', dismissed: 'Dismissed' }[change.status];
-    summary.append(node('span', { text: status, className: 'change-badge' }));
-    card.append(summary, node('p', { text: change.project_name, className: 'change-state' }));
-    card.append(diffView(change.diff));
-    if (change.status === 'pending') {
-      const error = node('p', { className: 'notice error' });
-      error.hidden = true;
-      error.setAttribute('role', 'alert');
-      const actions = node('div', { className: 'preview-actions' });
-      const dismiss = button('Dismiss', () => decide(change, 'dismiss', error), 'secondary');
-      const apply = button('Apply change', () => decide(change, 'apply', error), 'primary');
-      apply.disabled = !!state.run || change.project_name !== state.session?.project_name;
-      dismiss.disabled = !!state.run;
-      actions.append(dismiss, apply);
-      card.append(actions, error);
-    }
-    list.append(card);
-  }
-}
-
-export function bindProjects({ setProject, renderChrome }) {
+export function bindProjects({ setProject }) {
   const dialog = el('projects-dialog');
   const selection = el('registered-project');
   const errorTarget = el('project-error');
-  function openDialog() {
-    if (state.run || state.switching) return;
-    notice('', false, errorTarget);
+  let busy = false;
+
+  function renderPicker() {
+    const current = state.session?.project_name || '';
     selection.replaceChildren(new Option('Choose a project', ''));
     for (const project of state.projects) {
       const option = new Option(project.local ? project.name : project.name + ' (SSH)', project.name);
       option.disabled = !project.local;
       selection.add(option);
     }
-    el('detach-project').hidden = !state.session?.project_name;
-    el('attach-project').disabled = true;
+    selection.value = state.projects.some(project => project.name === current && project.local) ? current : '';
+    el('detach-project').hidden = !current;
+    el('attach-project').disabled = !selection.value;
+  }
+
+  function openDialog() {
+    if (locked() || busy) return;
+    notice('', false, errorTarget);
+    renderPicker();
     dialog.showModal();
   }
-  async function attach(value) {
+
+  async function updateProject(action) {
+    if (busy || locked()) return;
+    busy = true;
+    const controls = [...dialog.querySelectorAll('button, input, select')];
+    controls.forEach(control => { control.disabled = true; });
     try {
-      await setProject(value);
+      notice('', false, errorTarget);
+      const name = await action();
+      await setProject(name);
+      closeProject();
+      if (name) openProject();
       dialog.close();
-      if (value) openProject();
-      else closeProject();
-      return true;
     } catch (error) {
-      notice(error.message, true, errorTarget);
-      return false;
+      notice(error.message, true, dialog.open ? errorTarget : el('notice'));
+    } finally {
+      busy = false;
+      controls.forEach(control => { control.disabled = false; });
+      el('attach-project').disabled = !selection.value;
     }
   }
+
+  dialog.addEventListener('cancel', event => { if (busy) event.preventDefault(); });
   el('open-projects').addEventListener('click', openDialog);
   el('intro-project').addEventListener('click', openDialog);
-  el('toggle-project').addEventListener('click', () => panel().hidden ? openProject() : closeProject());
+  el('toggle-project').addEventListener('click', () => {
+    if (el('project-panel').hidden) openProject();
+    else closeProject();
+  });
   el('close-project').addEventListener('click', closeProject);
-  el('files-tab').addEventListener('click', () => {
-    selectTab('files');
-    if (!browser().hasChildNodes()) void browse();
-  });
+  el('files-tab').addEventListener('click', () => selectTab('files'));
   el('changes-tab').addEventListener('click', () => selectTab('changes'));
-  el('detach-project').addEventListener('click', () => attach(null));
+  document.addEventListener('project-file-changed', refreshFiles);
+  el('detach-project').addEventListener('click', () => updateProject(() => null));
   selection.addEventListener('change', () => { el('attach-project').disabled = !selection.value; });
-  el('attach-project-form').addEventListener('submit', async event => {
+  el('attach-project-form').addEventListener('submit', event => {
     event.preventDefault();
-    if (!selection.value) return;
-    const submit = el('attach-project');
-    submit.disabled = true;
-    await attach(selection.value);
-    submit.disabled = !selection.value;
+    if (selection.value) void updateProject(() => selection.value);
   });
-  el('register-project-form').addEventListener('submit', async event => {
+  el('register-project-form').addEventListener('submit', event => {
     event.preventDefault();
-    const submit = event.submitter;
-    submit.disabled = true;
-    try {
+    void updateProject(async () => {
       const record = await api('/api/projects', {
         method: 'POST', data: { name: el('register-name').value, root: el('register-root').value },
       });
       state.projects.push(record);
-      const option = new Option(record.name, record.name);
-      selection.add(option);
-      if (await attach(record.name)) event.target.reset();
-      renderChrome();
-    } catch (error) {
-      notice(error.message, true, errorTarget);
-    } finally {
-      submit.disabled = false;
-    }
+      selection.add(new Option(record.name, record.name));
+      selection.value = record.name;
+      event.target.reset();
+      return record.name;
+    });
   });
 }

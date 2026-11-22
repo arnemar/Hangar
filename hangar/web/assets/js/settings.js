@@ -1,14 +1,19 @@
 import { api } from './api.js';
-import { el, node, notice, state } from './state.js';
+import { el, locked, node, notice } from './state.js';
 
 export function bindSettings(refreshModels) {
   const dialog = el('settings-dialog');
   const target = el('settings-error');
+  const form = el('settings-form');
+  const submit = form.querySelector('button[type="submit"]');
+  let loading = false;
   el('open-settings').addEventListener('click', async () => {
-    if (state.run || state.switching) return;
+    if (locked() || loading || dialog.open) return;
+    loading = true;
     notice('', false, target);
     try {
       const settings = await api('/api/settings');
+      if (locked()) return;
       el('ollama-url').value = settings.ollama_url;
       el('context-length').value = settings.context_length;
       el('instructions').value = settings.system_prompt_chat;
@@ -18,11 +23,13 @@ export function bindSettings(refreshModels) {
       dialog.showModal();
     } catch (error) {
       notice(error.message, true);
+    } finally {
+      loading = false;
     }
   });
-  el('settings-form').addEventListener('submit', async event => {
+  form.addEventListener('submit', async event => {
     event.preventDefault();
-    const submit = event.submitter;
+    if (submit.disabled) return;
     submit.disabled = true;
     try {
       await api('/api/settings', {

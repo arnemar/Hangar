@@ -1,6 +1,7 @@
 """Regressions for project access and reviewed edits."""
 
 import sqlite3
+from contextlib import closing
 
 import pytest
 
@@ -99,7 +100,7 @@ def test_new_file_requires_the_original_attached_project(workspace):
 def test_migration_preserves_legacy_sessions_and_messages(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "DB_PATH", tmp_path / "old.db")
     db.init_chat_db()
-    with sqlite3.connect(db.DB_PATH) as conn:
+    with closing(sqlite3.connect(db.DB_PATH)) as conn, conn:
         conn.execute("INSERT INTO sessions VALUES ('s','Old chat','agent','old-model','1','1')")
         conn.execute("INSERT INTO messages VALUES ('m','s','user','Hello',NULL,NULL,'1')")
     conversations.migrate_workspace()

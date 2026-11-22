@@ -35,6 +35,7 @@ def _read(path: Path, default):
 def _write(path: Path, value) -> None:
     temporary = None
     try:
+        path.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(
             mode="w", encoding="utf-8", dir=path.parent, prefix=".hangar-", delete=False,
         ) as stream:
@@ -55,8 +56,19 @@ def load_memory() -> dict:
     return _read(MEMORY_PATH, {"facts": []})
 
 
+def saved_facts() -> list[str]:
+    facts = load_memory().get("facts")
+    return [
+        str(fact["content"]) for fact in facts
+        if isinstance(fact, dict) and fact.get("content")
+    ] if isinstance(facts, list) else []
+
+
 def load_settings() -> dict:
-    return {**_DEFAULTS, **_read(SETTINGS_PATH, {})}
+    settings = {**_DEFAULTS, **_read(SETTINGS_PATH, {})}
+    url = settings["ollama_url"]
+    settings["ollama_url"] = (url.strip() if isinstance(url, str) else "") or OLLAMA_URL
+    return settings
 
 
 def save_settings(settings: dict) -> None:

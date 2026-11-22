@@ -67,6 +67,7 @@ a { color: var(--accent); }
 .topbar-chat p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 650; }
 .topbar select { color: var(--muted); border: 1px solid var(--border); border-radius: 7px; background: var(--paper); padding: 2px 7px; min-width: 90px; max-width: 220px; }
 .topbar-actions { display: flex; gap: 4px; flex-shrink: 0; }
+#open-projects { max-width: min(34vw, 220px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .quiet, .secondary, .primary { padding: 5px 10px; }
 .quiet:hover, .icon:hover, .new-chat:hover { background: var(--soft); }
 .secondary { border-color: var(--border); background: var(--paper); }

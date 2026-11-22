@@ -11,8 +11,17 @@ export const state = {
   proposeEdits: false,
   searchWeb: false,
   run: null,
-  switching: false,
+  switching: true,
+  refreshingModels: false,
 };
+
+export function currentModel() {
+  return state.session?.model || state.draftModel || state.defaultModel;
+}
+
+export function locked() {
+  return Boolean(state.run || state.switching);
+}
 
 export function el(id) {
   return document.getElementById(id);

@@ -1,1 +1,1 @@
-"""FastAPI application and HTTP routers."""
+"""HTTP application for the local Hangar workspace."""
