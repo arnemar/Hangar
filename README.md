@@ -1,67 +1,41 @@
-# ai/workspace
+# Hangar
 
-Lightweight local AI workspace. Chat + Agent + Memory. Works on Linux and Windows.
+Hangar is a local chat app for Ollama. Start a conversation, attach a project for file context, and review proposed changes as diffs.
 
-## Requirements
-- Python 3.10+
-- Ollama running on localhost:11434
+## Run Hangar
 
-## Setup
+Install Python 3.10+ and start Ollama. Ollama can run on this computer or on a separate machine reachable from it.
 
-### Linux / macOS
-```bash
-git clone git@github.com:arnemar/Hangar.git
-cd ai_workspace
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-python app.py
-```
+1. Create a virtual environment with `python -m venv .venv` and activate it.
+2. Install dependencies with `python -m pip install -r requirements.txt`.
+3. Run `python app.py` and open [127.0.0.1:8080](http://127.0.0.1:8080).
 
-### Windows (PowerShell)
-```powershell
-git clone git@github.com:arnemar/Hangar.git
-cd ai_workspace
-python -m venv venv
-.\venv\Scripts\activate
-pip install -r requirements.txt
-python app.py
-```
+The frontend uses browser modules and needs no build or CDN. Use `python app.py --reload` for development.
 
-Open http://localhost:8080
+## Chat, files, and changes
 
-## Config (environment variables)
-- `OLLAMA_URL` — Ollama endpoint (default: http://localhost:11434)
-- `DEFAULT_MODEL` — Default model (default: deepseek-coder-v2:16b)
+- **Chat.** Choose an installed model per conversation. Set your Ollama URL, context window, and custom instructions in Settings. Saved facts from older versions can be reviewed and enabled there.
+- **Projects.** Attach a registered local folder by its absolute path on the computer running Hangar. Browse and preview UTF-8 files, or attach up to three excerpts to a message. Models with native Ollama tool calling can also list and read project files. For other models, use the attachment button.
+- **Edits.** Enable **Suggest edits** for the message. Review each proposed replacement or new file under **Changes**, and click **Apply change** to write it. A change applies only to its original project and file contents. Ask for a new proposal if the file has changed.
+- **Web search.** Enable **Search web** for the message to send the typed question to DuckDuckGo. Attached file contents stay out of that lookup.
 
-## Auto-start on Linux (systemd)
-```ini
-[Unit]
-Description=AI Workspace
-After=network.target ollama.service
+Hangar serves loopback only. The project browser rejects paths outside the attached folder and skips linked files, common credential files, and Hangar's data directory. Text file previews and edits support UTF-8 files up to 256 KiB. New files need an existing parent folder. Shell, SSH, MCP, and command execution are outside the chat tool set.
 
-[Service]
-Type=simple
-User=YOUR_USER
-WorkingDirectory=/home/YOUR_USER/ai_workspace
-ExecStart=/home/YOUR_USER/ai_workspace/venv/bin/python app.py
-Restart=always
-RestartSec=3
+Conversation history, project registrations, and settings use the existing `data/` directory. `HANGAR_DATA_DIR` can point to a separate directory for a test instance. Older chats open in the unified chat view. Legacy SSH project records remain stored and are unavailable in the local project picker.
 
-[Install]
-WantedBy=multi-user.target
-```
+## Project layout
 
-## Features
-- **Chat** — streaming responses, session history, memory injection
-- **Agent** — real tool execution (shell, file read/write, web search, memory)
-- **Memory** — persistent facts injected into every session
-- **Models** — switch models per session from sidebar
+| Path | Responsibility |
+| --- | --- |
+| `hangar/api/` | Local web server and API |
+| `hangar/runtime/` | Chat orchestration and context |
+| `hangar/workspace/` | Project file access and approved edits |
+| `hangar/persistence/` | SQLite, settings, and project registrations |
+| `hangar/integrations/` | Ollama transport |
+| `hangar/web/` | Browser UI and local assets |
+| `hangar/compiler/` | Standalone code graph and retrieval engine |
+| `tests/`, `tools/` | Regression tests and graph fixture builder |
 
-## Tools available to agent
-- `shell` — run any shell command
-- `read_file` — read file contents
-- `write_file` — write/append to files
-- `list_dir` — list directory contents
-- `web_search` — DuckDuckGo search
-- `manage_memory` — add/list/delete memories
+## Tests
+
+Install test dependencies with `python -m pip install -r requirements-dev.txt`. Run `python -m pytest` for the workspace tests. To include the compiler retrieval benchmark, run `python tools/build_graph_fixture.py` before pytest.

@@ -1,0 +1,51 @@
+.feed { flex: 1; min-height: 0; overflow: auto; position: relative; }
+.transcript { max-width: 760px; margin: 0 auto; padding: 27px 23px 18px; }
+.intro {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  position: absolute; inset: 0; padding: 16px; text-align: center; gap: 10px;
+}
+.intro-mark { width: 44px; height: 44px; border-radius: 14px; margin-bottom: 4px; }
+.intro h1 { font-size: clamp(30px, 4vw, 43px); line-height: 1.12; letter-spacing: -.055em; font-weight: 680; }
+.intro p { max-width: 380px; color: var(--muted); }
+.intro button { margin-top: 8px; border-color: var(--border); }
+.turn { margin-bottom: 23px; overflow-wrap: anywhere; }
+.turn.user { width: fit-content; max-width: min(86%, 640px); margin-left: auto; background: var(--panel); padding: 10px 15px; border-radius: 15px 15px 4px 15px; }
+.turn.user .answer { white-space: pre-wrap; }
+.turn.assistant .role { color: var(--accent); font-size: 12px; font-weight: 675; margin-bottom: 6px; }
+.answer { line-height: 1.62; }
+.answer.streaming { white-space: pre-wrap; }
+.answer :is(p, ul, ol, blockquote, pre, h2, h3, h4) { margin: 0 0 9px; }
+.answer :is(h2, h3, h4) { line-height: 1.25; font-size: 1.13em; margin-top: 13px; }
+.answer p { white-space: pre-wrap; }
+.answer :is(ul, ol) { padding-left: 24px; }
+.answer blockquote { margin-left: 0; padding-left: 12px; border-left: 2px solid var(--border); color: var(--muted); }
+.answer code, .file-text, .diff { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: .89em; }
+.answer code { background: var(--soft); padding: 1px 4px; border-radius: 4px; }
+.code-block { border: 1px solid var(--border); border-radius: 9px; background: #f5f7f2; margin: 10px 0; overflow: hidden; }
+.code-toolbar { display: flex; justify-content: space-between; align-items: center; padding: 2px 8px; color: var(--muted); font-size: 12px; border-bottom: 1px solid var(--border); }
+.code-block pre { overflow: auto; margin: 0; padding: 10px 12px; }
+.code-block code { padding: 0; background: none; }
+.turn-meta { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 3px; }
+.turn-meta span { font-size: 12px; border: 1px solid var(--border); border-radius: 5px; padding-inline: 5px; }
+.activity { color: var(--muted); font-size: 13px; padding-left: 11px; border-left: 2px solid #87b6a0; margin-block: 6px 14px; }
+.composer-area { width: min(760px, 100%); margin-inline: auto; padding: 4px 22px 12px; }
+.composer {
+  border: 1px solid #cfd9cd; background: white; border-radius: 15px; padding: 9px 9px 8px;
+  box-shadow: 0 4px 18px #17251b0a;
+}
+.composer:focus-within { border-color: #8eb6a4; }
+.composer textarea { display: block; width: 100%; resize: vertical; min-height: 48px; max-height: 35vh; padding: 6px 7px; border: 0; outline: none; background: transparent; }
+.composer-controls { display: flex; gap: 6px; align-items: center; justify-content: end; }
+.composer-options { flex: 1; display: flex; align-items: center; flex-wrap: wrap; gap: 5px; }
+.composer-note { text-align: center; font-size: 12px; color: var(--muted); margin-top: 7px; }
+.chip { border: 1px solid var(--border); color: var(--muted); min-height: 29px; border-radius: 20px; padding: 3px 8px; font-size: 12px; }
+.chip[aria-pressed="true"] { color: #174d38; border-color: #99c3af; background: var(--accent-light); }
+.attachments { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 6px 6px; }
+.attachments button { min-height: 26px; max-width: 100%; overflow-wrap: anywhere; }
+.notice { color: var(--muted); background: var(--soft); margin: 0 0 7px; border-radius: 6px; padding: 6px 9px; font-size: 13px; overflow-wrap: anywhere; }
+.notice.error { color: var(--danger); background: #fff2ee; }
+@media (max-width: 500px) {
+  .composer-area { padding-inline: 9px; }
+  .transcript { padding-inline: 13px; }
+  .intro { padding-bottom: 27px; }
+}

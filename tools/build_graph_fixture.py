@@ -26,7 +26,7 @@ _PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 sys.path.insert(0, str(_PROJECT_ROOT))
 
 # ── Patch db.DB_PATH BEFORE importing any project module ────────────────────
-import db  # noqa: E402
+from hangar.persistence import db  # noqa: E402
 
 _FIXTURE_DIR = _PROJECT_ROOT / "tests" / "fixtures"
 _FIXTURE_DB = _FIXTURE_DIR / "hangar_graph.db"
@@ -64,7 +64,7 @@ def build_fixture(project_root: Path) -> None:
 
         print(f"[fixture] compiling {project_root} → {tmp_path.name}")
 
-        from compiler.pipeline import compile_project
+        from hangar.compiler.pipeline import compile_project
 
         result = compile_project(PROJECT_ID, project_root)
 

@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hangar</title>
+  <link rel="stylesheet" href="/static/css/layout.css">
+  <link rel="stylesheet" href="/static/css/conversation.css">
+  <link rel="stylesheet" href="/static/css/project.css">
+  <script type="module" src="/static/js/main.js"></script>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar" id="sidebar" aria-label="Chat sidebar">
+      <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span>Hangar</span></div>
+      <button class="new-chat" id="new-chat" type="button"><span aria-hidden="true">＋</span> New chat</button>
+      <p class="sidebar-label" id="history-label">Chats</p>
+      <nav class="chat-list" id="chat-list" aria-labelledby="history-label"></nav>
+      <div class="sidebar-footer">
+        <p class="connection" id="connection" role="status">Connecting to Ollama…</p>
+        <button class="quiet settings-button" type="button" id="open-settings">Settings</button>
+      </div>
+    </aside>
+    <main class="conversation" aria-label="Conversation">
+      <header class="topbar">
+        <button type="button" id="open-sidebar" class="icon mobile-only" aria-label="Toggle chats" aria-controls="sidebar" aria-expanded="false">☰</button>
+        <div class="topbar-chat">
+          <p id="chat-title">New chat</p>
+          <select id="model-select" aria-label="Ollama model"><option value="">Choose a model</option></select>
+        </div>
+        <div class="topbar-actions">
+          <button id="open-projects" type="button" class="quiet">Attach project</button>
+          <button id="toggle-project" type="button" class="quiet" aria-controls="project-panel" aria-expanded="false" hidden>Files</button>
+        </div>
+      </header>
+      <div class="feed" id="feed">
+        <div class="transcript" id="transcript"></div>
+        <div class="intro" id="intro">
+          <span class="brand-mark intro-mark" aria-hidden="true"></span>
+          <h1>How can I help?</h1>
+          <p>Start a conversation or attach a project to work with its files.</p>
+          <button type="button" class="quiet" id="intro-project">Attach a project</button>
+        </div>
+      </div>
+      <div class="composer-area">
+        <p id="notice" class="notice" role="status" hidden></p>
+        <form id="composer" class="composer">
+          <div id="attachments" class="attachments" aria-label="Attached files" hidden></div>
+          <textarea id="message" aria-label="Message" rows="2" placeholder="Message Hangar"></textarea>
+          <div class="composer-controls">
+            <div class="composer-options">
+              <button type="button" class="chip" id="search-web" aria-pressed="false">Search web</button>
+              <button type="button" class="chip" id="suggest-edits" aria-pressed="false" hidden>Suggest edits</button>
+            </div>
+            <button type="button" class="secondary" id="stop" hidden>Stop</button>
+            <button type="submit" class="primary" id="send">Send <span aria-hidden="true">↑</span></button>
+          </div>
+        </form>
+        <p class="composer-note" id="access-note"></p>
+      </div>
+    </main>
+    <aside id="project-panel" class="project-panel" aria-label="Project files and changes" hidden>
+      <header class="project-header">
+        <div><h2 id="project-title">Project</h2><p id="project-path"></p></div>
+        <button class="icon" type="button" id="close-project" aria-label="Close project panel">×</button>
+      </header>
+      <div class="panel-tabs">
+        <button type="button" id="files-tab" aria-pressed="true">Files</button>
+        <button type="button" id="changes-tab" aria-pressed="false">Changes</button>
+      </div>
+      <section id="file-browser" class="panel-content" aria-label="Project files"></section>
+      <section id="change-list" class="panel-content" aria-label="Proposed changes" hidden></section>
+    </aside>
+  </div>
+  <dialog id="projects-dialog">
+    <div class="dialog-heading"><h2>Attach a project</h2><button class="icon" type="button" data-close="projects-dialog" aria-label="Close project dialog">×</button></div>
+    <form id="attach-project-form" class="stack">
+      <label>Registered project <select id="registered-project"><option value="">Choose a project</option></select></label>
+      <div class="dialog-actions">
+        <button type="button" class="secondary" id="detach-project" hidden>Detach current</button>
+        <button type="submit" class="primary" id="attach-project" disabled>Attach</button>
+      </div>
+    </form>
+    <form id="register-project-form" class="stack separated">
+      <h3>Add a local folder</h3>
+      <label>Project name <input id="register-name" required maxlength="100" autocomplete="off"></label>
+      <label>Folder path <input id="register-root" required autocomplete="off" placeholder="/home/me/projects/example"></label>
+      <p class="field-help">Use an absolute path on the computer running Hangar.</p>
+      <div class="dialog-actions"><button type="submit" class="primary">Add and attach</button></div>
+    </form>
+    <p class="notice error" id="project-error" role="alert" hidden></p>
+  </dialog>
+  <dialog id="settings-dialog">
+    <div class="dialog-heading"><h2>Ollama settings</h2><button class="icon" type="button" data-close="settings-dialog" aria-label="Close settings">×</button></div>
+    <form id="settings-form" class="stack">
+      <label>Ollama URL <input id="ollama-url" placeholder="http://localhost:11434" autocomplete="off"></label>
+      <label>Context window <input id="context-length" type="number" min="1024" step="1" required></label>
+      <label>Custom instructions <textarea id="instructions" rows="4" maxlength="20000"></textarea></label>
+      <div id="memory-options" hidden>
+        <label class="checkbox-label"><input id="use-memory" type="checkbox"> Use saved facts in chat</label>
+        <details><summary>Review saved facts</summary><ul id="saved-facts"></ul></details>
+      </div>
+      <p class="notice error" id="settings-error" role="alert" hidden></p>
+      <div class="dialog-actions"><button type="submit" class="primary">Save settings</button></div>
+    </form>
+  </dialog>
+</body>
+</html>

@@ -8,24 +8,17 @@ of the expected symbols in the top TOP_K results. Cases whose expected nodes are
 absent from the fixture (renamed/deleted symbols) are skipped, not failed.
 """
 
-# Patch db.DB_PATH BEFORE any project imports to redirect all DB calls to fixture
-import sys
+import json
+import sqlite3
 from pathlib import Path
 
-_ROOT = Path(__file__).parent.parent
-if str(_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ROOT))
+import pytest
 
-import db  # noqa: E402 — must patch before other imports
+from hangar.compiler.search import find_symbols
+from hangar.persistence import db
+
+_ROOT = Path(__file__).resolve().parent.parent
 FIXTURE = Path(__file__).parent / "fixtures" / "hangar_graph.db"
-db.DB_PATH = FIXTURE
-
-import json  # noqa: E402
-import sqlite3  # noqa: E402
-
-import pytest  # noqa: E402
-
-from compiler.search import find_symbols  # noqa: E402
 
 PROJECT_ID = "hangar"
 EVAL_FILE = Path(__file__).parent / "eval" / "retrieval_cases.jsonl"
@@ -55,7 +48,9 @@ def graph_db():
             f"Graph fixture not found at {FIXTURE.relative_to(_ROOT)}\n"
             "Run:  python tools/build_graph_fixture.py"
         )
-    return FIXTURE
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(db, "DB_PATH", FIXTURE)
+        yield FIXTURE
 
 
 def _resolve_expected(expected: list[dict], conn: sqlite3.Connection) -> list[str]:
@@ -63,7 +58,7 @@ def _resolve_expected(expected: list[dict], conn: sqlite3.Connection) -> list[st
     node_ids = []
     for exp in expected:
         row = conn.execute(
-            "SELECT id FROM nodes WHERE name = ? AND path = ? AND kind = ? AND project_id = ?",
+            "SELECT id FROM nodes WHERE name = ? AND replace(path, char(92), '/') = ? AND kind = ? AND project_id = ?",
             (exp["name"], exp["path"], exp["kind"], PROJECT_ID),
         ).fetchone()
         if row:

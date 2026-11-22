@@ -1,0 +1,38 @@
+.project-panel {
+  background: #f8faf6; border-left: 1px solid var(--border);
+  flex: 0 0 335px; width: 335px; min-width: 0; display: flex; flex-direction: column;
+}
+.project-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 7px; padding: 14px 10px 10px 15px; min-height: 64px; }
+.project-header div { min-width: 0; }
+.project-header h2 { font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-header p { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.panel-tabs { display: flex; gap: 8px; padding: 0 11px; border-bottom: 1px solid var(--border); }
+.panel-tabs button { padding-inline: 10px; border-radius: 0; border-bottom: 2px solid transparent; color: var(--muted); }
+.panel-tabs button[aria-pressed="true"] { border-bottom-color: var(--accent); font-weight: 620; color: var(--accent); }
+.panel-content { overflow: auto; padding: 10px 12px; min-height: 0; }
+.folder-path { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; margin: 4px 0 7px; }
+.file-row {
+  display: flex; align-items: baseline; gap: 6px; width: 100%; text-align: left;
+  padding: 4px 7px; min-height: 30px; font-size: 13px; overflow-wrap: anywhere;
+}
+.file-row:hover { background: var(--soft); }
+.file-row span:first-child { color: var(--accent); font-size: 12px; }
+.preview-actions { display: flex; flex-wrap: wrap; gap: 5px; padding: 7px 0; align-items: center; }
+.file-text, .diff {
+  display: block; background: #f1f4ee; color: var(--ink); border: 1px solid var(--border);
+  border-radius: 7px; max-height: 45vh; overflow: auto; white-space: pre; padding: 7px 9px;
+}
+.change-card { border: 1px solid var(--border); border-radius: 8px; padding: 8px; background: var(--paper); margin-bottom: 8px; }
+.change-card summary { cursor: pointer; overflow-wrap: anywhere; font-weight: 600; font-size: 13px; }
+.change-badge { color: var(--muted); margin-left: 8px; font-size: 11px; font-weight: 400; }
+.change-state { color: var(--muted); font-size: 12px; margin: 5px 0; }
+.diff { max-height: 330px; padding: 6px; }
+.diff .added { color: #265d43; background: #e1f4e7; }
+.diff .removed { color: #87392f; background: #fbe6e1; }
+.empty-panel { color: var(--muted); font-size: 13px; padding: 9px 1px; }
+@media (max-width: 1050px) {
+  .project-panel { width: 305px; flex-basis: 305px; }
+}
+@media (max-width: 760px) {
+  .project-panel { position: fixed; inset: 0 0 0 auto; width: min(335px, 86vw); z-index: 7; box-shadow: -12px 0 28px #16221925; }
+}
